@@ -10,7 +10,7 @@ Shadow-Step 레포 골격을 세우고, 그림자 계산(ShadowCaster)·경계 �
 ## 태스크
 
 - [x] 레포 폴더 구조 생성 (`src/ui`, `src/shadow`, `src/physics`, `src/procgen`, `src/ai`, `src/entities`, `src/core`) — 담당: 배영환 — `feature/repo-scaffold` 병합 완료
-- [ ] React + TypeScript + Canvas 셋업, Hello World 렌더 확인 — 담당: 송원호
+- [x] React + TypeScript + Canvas 셋업, Hello World 렌더 확인 — 담당: 송원호 — `feature/canvas-setup` 병합 완료, 브라우저 실확인 완료
 - [x] `Stage` 데이터 계약 타입 정의 (`lightPos`, `boundaryPolygon`, `obstacles`, `spawn`) — 담당: 배영환 — `src/core/stage.ts`
 - [x] ShadowCaster 구현 (광원+캐릭터 위치 → 그림자 선분, `d = normalize(C - L)`, `tip = C + d·ℓ`) — 담당: 배영환 — `feature/shadow-core` 병합 완료, 단위 테스트 포함
 - [x] ContainmentJudge 구현 (point-in-polygon + 선분-다각형 교차) + 경계 케이스 단위 테스트 (정점 접촉, 공선) — 담당: 배영환 — `feature/shadow-core` 병합 완료
