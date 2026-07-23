@@ -44,6 +44,9 @@ Thumbs.db
 # 세션 상태 (로컬 전용)
 docs/ref/session-state.md
 
+# 개인 작업 목록 (로컬 전용)
+TODO-wonho.md
+
 # 캐시 (로컬 전용)
 .cache/
 
