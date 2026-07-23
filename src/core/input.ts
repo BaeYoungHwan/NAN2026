@@ -1,7 +1,17 @@
 import { useEffect, useRef } from "react";
-import type { MoveInput } from "../entities/character";
 
-const KEY_MAP: Record<string, keyof MoveInput> = {
+export interface InputState {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  /** ',' — 그림자 시계방향 회전 */
+  rotateCW: boolean;
+  /** '.' — 그림자 반시계방향 회전 */
+  rotateCCW: boolean;
+}
+
+const KEY_MAP: Record<string, keyof InputState> = {
   w: "up",
   ArrowUp: "up",
   s: "down",
@@ -10,24 +20,33 @@ const KEY_MAP: Record<string, keyof MoveInput> = {
   ArrowLeft: "left",
   d: "right",
   ArrowRight: "right",
+  ",": "rotateCW",
+  ".": "rotateCCW",
 };
 
 /**
- * WASD/방향키 입력을 추적하는 훅. 렌더를 유발하지 않도록 ref로 보관하고,
- * 게임 루프(requestAnimationFrame)가 매 프레임 직접 읽는다.
+ * WASD(이동) + , . (그림자 회전) 입력을 추적하는 훅. 렌더를 유발하지
+ * 않도록 ref로 보관하고, 게임 루프(requestAnimationFrame)가 매 프레임 직접 읽는다.
  */
 export function useKeyboardInput() {
-  const inputRef = useRef<MoveInput>({ up: false, down: false, left: false, right: false });
+  const inputRef = useRef<InputState>({
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    rotateCW: false,
+    rotateCCW: false,
+  });
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const direction = KEY_MAP[event.key];
-      if (direction) inputRef.current[direction] = true;
+      const key = KEY_MAP[event.key];
+      if (key) inputRef.current[key] = true;
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      const direction = KEY_MAP[event.key];
-      if (direction) inputRef.current[direction] = false;
+      const key = KEY_MAP[event.key];
+      if (key) inputRef.current[key] = false;
     };
 
     window.addEventListener("keydown", handleKeyDown);

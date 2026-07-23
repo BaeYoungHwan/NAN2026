@@ -2,6 +2,8 @@
 
 > 출처: `docs/design-docs/adr/ADR-001-shadow-boundary-judgment.md` 결정 + 팀 역할 분담(`TeamMate.md`)
 > 생성: 2026-07-23
+>
+> **2026-07-23 추가**: 아래 태스크는 완료 당시(ADR-001, 레벨 고정 폴리곤 모델) 기준 기록이다. 실제 플레이 테스트 결과 메커니즘이 "캐릭터+그림자 이중 조작 / 캐릭터 부착 안전 구역"으로 정정되어 `fix/shadow-dual-control` 브랜치에서 ShadowCaster·ContainmentJudge·GameCanvas를 다시 구현했다. 최신 설계는 [`ADR-002`](../../design-docs/adr/ADR-002-shadow-dual-control.md)와 [`shadow-mechanic-diagram.md`](../../design-docs/shadow-mechanic-diagram.md) 참고. 아래 체크박스는 "해당 시점에 완료됨"의 기록이며 세부 서술(선분/폴리곤 등)은 최신 문서 기준으로 다시 읽을 것.
 
 ## 목표
 
