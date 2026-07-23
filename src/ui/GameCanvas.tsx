@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Point } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
-import { moveCharacter } from "../entities/character";
+import { moveCharacter } from "../physics/character";
 import { naturalAngle, shadowTip } from "../shadow/shadowCaster";
 import { isShadowAligned } from "../shadow/containmentJudge";
 import { ROTATION_SPEED, SAFE_ANGLE_TOLERANCE, SHADOW_LENGTH, STATIC_STAGE } from "../procgen/staticStage";

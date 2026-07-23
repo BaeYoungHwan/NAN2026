@@ -36,10 +36,9 @@ NHN NAN2026 해커톤 사전과제 제출용 웹 게임 "Shadow-Step"(가제). �
 src/
 ├── ui/             # React 컴포넌트 (타이틀, HUD, 재시작/클리어 화면)
 ├── shadow/         # ShadowCaster(자연 각도·그림자 끝점 계산) + ContainmentJudge(각도 허용치 판정) — shadow-physics 도메인
-├── physics/        # 캐릭터 이동, 지형(벽) 충돌 등 기본 물리
+├── physics/        # 캐릭터 이동(character.ts), 지형(벽) 충돌 등 기본 물리
 ├── procgen/        # 스테이지 지형·광원 위치 절차적 생성
 ├── ai/             # 이동 패턴 학습 및 동선 차단 알고리즘
-├── entities/       # 게임 오브젝트 (캐릭터, 지형, 그림자)
 ├── assets/         # 이미지/사운드/폰트
 └── core/           # 게임 루프, 입력 처리, 라운드 상태(1R~3R) 관리, 공통 유틸
 ```

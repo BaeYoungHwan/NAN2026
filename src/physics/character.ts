@@ -19,7 +19,7 @@ export interface Bounds {
 /**
  * 입력 방향으로 캐릭터를 이동시키고, 화면(캔버스) 경계 안으로 clamp한다.
  * 이 clamp는 캐릭터의 물리적 이동 범위일 뿐, 그림자가 지켜야 하는
- * 안전 경계(boundaryPolygon)와는 별개의 개념이다.
+ * 안전 구역(자연 각도 ± 허용치)과는 별개의 개념이다 — ADR-002.
  */
 export function moveCharacter(
   position: Point,
