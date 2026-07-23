@@ -10,9 +10,9 @@
 - [x] `/init-project` 실행 완료
 - [x] 게임 주제/컨셉 확정 — Shadow-Step, 그림자 회피 액션 퍼즐
 - [x] 기술 스택 확정 — TypeScript + React + HTML5 Canvas
-- [ ] `docs/design-docs/architecture-v1.md` 검토 및 확정
+- [x] `docs/design-docs/architecture-v1.md` 검토 및 확정 — 그림자 경계 판정 방식 확정 (`ADR-001`)
 - [ ] `docs/design-docs/ARD-v1.md` 비기능 요건 확정
-- [ ] Phase 분할 후 `docs/exec-plans/active/`에 실행 계획 생성
+- [x] Phase 분할 후 `docs/exec-plans/active/`에 실행 계획 생성 — [`phase-1-foundation.md`](docs/exec-plans/active/phase-1-foundation.md)
 
 ---
 
