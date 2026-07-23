@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
+import { advanceRound, isGuideVisible, type Round } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
 import { naturalAngle, shadowTip } from "../shadow/shadowCaster";
@@ -20,13 +21,15 @@ const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 const GOAL_RADIUS = 40; // 골 도달 판정 반경(px)
 
 export interface GameCanvasHandle {
-  /** 캐릭터·그림자 각도를 스폰 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
+  /** 캐릭터·그림자 각도·라운드를 스폰/1R 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
   restart: () => void;
 }
 
 interface GameCanvasProps {
   /** 사망(정렬 이탈) 이벤트가 발생할 때만 호출된다 — 매 프레임 호출되지 않음. */
   onDeathCountChange?: (count: number) => void;
+  /** 라운드가 바뀔 때만 호출된다(골 도달로 다음 라운드 진행 시) — 매 프레임 호출되지 않음. */
+  onRoundChange?: (round: Round) => void;
 }
 
 /**
@@ -35,10 +38,13 @@ interface GameCanvasProps {
  * - 그림자는 , . 로 직접 회전 (광원 위치와 무관, 자동 복귀 없음)
  * - 안전 구역(캐릭터 뒤, 광원 반대 방향 ± 허용각)은 광원-캐릭터 위치로 매 프레임 재계산됨
  * - 그림자 각도가 안전 구역을 벗어나면 즉시 스폰 위치로 리셋
- * - 골 지점에 도달하면 클리어
+ * - 하나의 스테이지(같은 통로)를 1R→2R→3R 순서로 도전한다. 골 도달 시 다음
+ *   라운드로 진행하고(캐릭터·그림자각 스폰 기준 리셋), 3R 골 도달이 스테이지
+ *   전체 클리어다. 1R은 안전 구역 가이드라인(부채꼴)을 보여주고, 2R부터는
+ *   가이드라인을 숨긴다(그림자 색상 피드백은 유지) — PRD §7-1.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
-  { onDeathCountChange },
+  { onDeathCountChange, onRoundChange },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -48,6 +54,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const characterRef = useRef<Point>({ ...stage.spawn });
   const shadowAngleRef = useRef(naturalAngle(stage.lightPos, stage.spawn));
   const deathCountRef = useRef(0);
+  const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
 
   useImperativeHandle(
@@ -56,10 +63,12 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       restart: () => {
         characterRef.current = { ...stage.spawn };
         shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+        roundRef.current = 1;
         clearedRef.current = false;
+        onRoundChange?.(1);
       },
     }),
-    [stage],
+    [stage, onRoundChange],
   );
 
   useEffect(() => {
@@ -101,18 +110,26 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           characterRef.current.y - stage.goal.y,
         );
         if (distanceToGoal <= GOAL_RADIUS) {
-          clearedRef.current = true;
+          const { round, stageCleared } = advanceRound(roundRef.current);
+          roundRef.current = round;
+          onRoundChange?.(round);
+          if (stageCleared) {
+            clearedRef.current = true;
+          } else {
+            characterRef.current = { ...stage.spawn };
+            shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+          }
         }
       }
 
-      renderFrame(ctx, stage, characterRef.current, shadowAngleRef.current, clearedRef.current);
+      renderFrame(ctx, stage, characterRef.current, shadowAngleRef.current, roundRef.current, clearedRef.current);
 
       frameId = requestAnimationFrame(draw);
     };
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, stage, canOccupy, onDeathCountChange]);
+  }, [inputRef, stage, canOccupy, onDeathCountChange, onRoundChange]);
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
 });
@@ -124,6 +141,7 @@ function renderFrame(
   stage: Stage,
   characterPos: Point,
   shadowAngle: number,
+  round: Round,
   cleared: boolean,
 ) {
   ctx.fillStyle = "#111";
@@ -134,22 +152,24 @@ function renderFrame(
   const natural = naturalAngle(stage.lightPos, characterPos);
   const aligned = isShadowAligned(shadowAngle, natural, SAFE_ANGLE_TOLERANCE);
 
-  // 안전 구역 — 캐릭터 뒤(광원 반대 방향) ± 허용각 부채꼴
-  ctx.beginPath();
-  ctx.moveTo(characterPos.x, characterPos.y);
-  ctx.arc(
-    characterPos.x,
-    characterPos.y,
-    SAFE_ZONE_RADIUS,
-    natural - SAFE_ANGLE_TOLERANCE,
-    natural + SAFE_ANGLE_TOLERANCE,
-  );
-  ctx.closePath();
-  ctx.fillStyle = "rgba(74, 144, 217, 0.25)";
-  ctx.fill();
-  ctx.strokeStyle = "#4a90d9";
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
+  if (isGuideVisible(round)) {
+    ctx.beginPath();
+    ctx.moveTo(characterPos.x, characterPos.y);
+    ctx.arc(
+      characterPos.x,
+      characterPos.y,
+      SAFE_ZONE_RADIUS,
+      natural - SAFE_ANGLE_TOLERANCE,
+      natural + SAFE_ANGLE_TOLERANCE,
+    );
+    ctx.closePath();
+    ctx.fillStyle = "rgba(74, 144, 217, 0.25)";
+    ctx.fill();
+    ctx.strokeStyle = "#4a90d9";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 
   // 광원
   ctx.fillStyle = "#f5d547";
@@ -157,7 +177,7 @@ function renderFrame(
   ctx.arc(stage.lightPos.x, stage.lightPos.y, 8, 0, Math.PI * 2);
   ctx.fill();
 
-  // 그림자 — 정렬 여부에 따라 색을 바꿔 즉각적인 시각 피드백을 준다
+  // 그림자 — 정렬 여부에 따라 색을 바꿔 즉각적인 시각 피드백을 준다 (라운드 무관 항상 표시)
   const tip = shadowTip(characterPos, shadowAngle, SHADOW_LENGTH);
   ctx.strokeStyle = aligned ? "#4caf50" : "#e53935";
   ctx.lineWidth = 3;
