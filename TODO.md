@@ -1,4 +1,4 @@
-# TODO — NAN2026
+# TODO — NAN2026 (Shadow-Step, 가제)
 
 > 워크플로우: `[ ]` 대기 → `[🔄]` 진행 중 → `[x]` 완료
 > 재시작 시: `docs/ref/session-state.md` 확인 후 `[🔄]` 항목부터 재개
@@ -8,28 +8,32 @@
 ## 시작 전
 
 - [x] `/init-project` 실행 완료
-- [ ] 게임 주제/컨셉 확정 (자유 주제 — 사전과제용)
-- [ ] `docs/design-docs/architecture-v1.md` 검토 및 확정 (주제 확정 후 갱신 필요)
+- [x] 게임 주제/컨셉 확정 — Shadow-Step, 그림자 회피 액션 퍼즐
+- [x] 기술 스택 확정 — TypeScript + React + HTML5 Canvas
+- [ ] `docs/design-docs/architecture-v1.md` 검토 및 확정
 - [ ] `docs/design-docs/ARD-v1.md` 비기능 요건 확정
 - [ ] Phase 분할 후 `docs/exec-plans/active/`에 실행 계획 생성
 
 ---
 
-## P0 — 주제 확정 및 기반 구축
+## P0 — 기반 구축
 
-- [ ] 게임 주제/컨셉 브레인스토밍 (자유 주제)
-- [ ] 기술 스택(엔진) 확정 — 웹 브라우저 실행 필수 조건 하에서 결정
 - [ ] 레포 초기화 및 폴더 구조 생성 (src/, tests/ 등)
-- [ ] 기술 스택 설치 및 Hello World 확인
+- [ ] React + TypeScript + Canvas 셋업 및 Hello World 확인
+- [ ] 그림자 각도/궤적 계산 로직 프로토타입 스파이크 (핵심 재미 검증)
 - [ ] GitHub Pages 배포 파이프라인 초안 구성 (심사자가 링크만으로 플레이 가능해야 함)
 
 ---
 
 ## P1 — MVP 핵심 기능
 
-> 주제 확정 후 정의 (docs/product-specs/PRD-v1.md 7번 갱신과 함께 채울 것)
-
-- [ ] (주제 확정 후 작성)
+- [ ] WASD / 방향키 기반 캐릭터 이동 시스템
+- [ ] 광원(태양) 고정 위치 지정 및 캐릭터 위치 기반 실시간 그림자 궤적/각도 계산 (ShadowCaster — 선분 모델)
+- [ ] 그림자 경계 이탈 판정 (즉사 및 스테이지 리셋, 기하학적/벡터 방식 — ContainmentJudge)
+- [ ] 스테이지 지형·광원 위치·안전 경계 다각형 절차적 생성 (Procedural Generation)
+- [ ] 플레이어 이동 패턴 학습 → 자주 가는 동선 차단 AI 알고리즘
+- [ ] 실패 시 즉시 재시작(리트라이) 흐름
+- [ ] 최소 UI (조작법 안내, 재시작 버튼, 클리어 표시)
 
 ---
 
