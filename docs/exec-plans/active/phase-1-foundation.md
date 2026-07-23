@@ -16,7 +16,7 @@ Shadow-Step 레포 골격을 세우고, 그림자 계산(ShadowCaster)·경계 �
 - [x] ContainmentJudge 구현 (point-in-polygon + 선분-다각형 교차) + 경계 케이스 단위 테스트 (정점 접촉, 공선) — 담당: 배영환 — `feature/shadow-core` 병합 완료
 - [x] 임시 정적 스테이지(경계 다각형 하드코딩)로 캐릭터 이동 + 그림자 + 판정 결과 시각화 프로토타입 — 담당: 송원호 — `feature/render-prototype` 병합 완료, 브라우저 실확인 완료 (스폰 좌표 버그 발견·수정)
 - [x] 60 FPS 프레임타임 측정 (저사양 환경 시뮬레이션 포함) — 담당: 배영환·송원호 — 실측 60.08 FPS (rAF 3초 측정, 저사양 시뮬레이션은 미실시)
-- [ ] GitHub Pages 배포 파이프라인 초안 구성 — 담당: 배영환
+- [x] GitHub Pages 배포 파이프라인 초안 구성 — 담당: 배영환 — `feature/pages-deploy` 병합 완료 (`.github/workflows/deploy-pages.yml`, main push 시 자동 배포)
 
 ## 브랜치 전략
 
@@ -41,7 +41,7 @@ Shadow-Step 레포 골격을 세우고, 그림자 계산(ShadowCaster)·경계 �
 - [x] 그림자 선분이 광원-캐릭터 위치에 맞춰 매 프레임 시각적으로 정확히 그려짐 — Chrome DevTools 스크린샷으로 확인
 - [x] 경계 이탈 시 정확히 사망 판정, 정점/공선 경계 케이스에서도 "억울한 죽음" 없음 — 단위 테스트 + 브라우저 실측 (좌우 이동 시 오탐 없음 확인). 정점/공선은 단위 테스트만 커버, 브라우저 실측은 일반 이동 케이스만
 - [x] 60 FPS 유지 확인 (Chrome/Edge) — 실측 60.08 FPS. Edge에서는 미확인, 저사양 환경 시뮬레이션도 미실시
-- [ ] GitHub Pages 링크로 배포 및 접속 확인 (설치 없이 브라우저 플레이)
+- [ ] GitHub Pages 링크로 배포 및 접속 확인 (설치 없이 브라우저 플레이) — 워크플로는 구성 완료, 실제 배포는 `develop→main` 병합 + 저장소 Settings→Pages→Source를 GitHub Actions로 전환 후 확인 가능
 
 ## 미결 (Phase 1 진행 중 결정 필요)
 
