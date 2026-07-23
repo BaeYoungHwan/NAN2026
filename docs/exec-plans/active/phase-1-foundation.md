@@ -18,6 +18,24 @@ Shadow-Step 레포 골격을 세우고, 그림자 계산(ShadowCaster)·경계 �
 - [ ] 60 FPS 프레임타임 측정 (저사양 환경 시뮬레이션 포함) — 담당: 배영환·송원호
 - [ ] GitHub Pages 배포 파이프라인 초안 구성 — 담당: 배영환
 
+## 브랜치 전략
+
+`CONTRIBUTING.md`의 3단계 전략(`feature/*` → `develop` → `main`)을 이 Phase의 태스크에 매핑한다. `Stage` 데이터 계약이 배영환·송원호 작업 모두의 기반이므로, 병합 순서를 지키지 않으면 충돌이 커진다.
+
+| 순서 | 브랜치 | 담당 | 포함 태스크 | 선행 조건 | PR 대상 |
+|------|--------|------|-------------|-----------|---------|
+| 1 | `feature/repo-scaffold` | 배영환 | 레포 폴더 구조 생성, `Stage` 데이터 계약 타입 정의, 프로젝트 설정(package.json/tsconfig 등) | 없음 — 가장 먼저 병합 | `develop` |
+| 2a | `feature/canvas-setup` | 송원호 | React+TS+Canvas 셋업, Hello World 렌더 확인 | `repo-scaffold`가 `develop`에 병합된 후 시작 (설정 파일 충돌 방지) | `develop` |
+| 2b | `feature/shadow-core` | 배영환 | ShadowCaster·ContainmentJudge 구현 + 경계 케이스 단위 테스트 | `repo-scaffold`가 `develop`에 병합된 후 시작 (`Stage` 타입 필요). `canvas-setup`과는 서로 다른 파일이라 병렬 진행 가능 | `develop` |
+| 3 | `feature/render-prototype` | 송원호 | 정적 스테이지(경계 다각형 하드코딩)로 캐릭터·그림자·판정 결과 시각화 | `canvas-setup`과 `shadow-core` 둘 다 `develop`에 병합된 후 시작 | `develop` |
+| 4 | `feature/pages-deploy` | 배영환 | GitHub Pages 배포 파이프라인 초안 | 없음 — 아무 때나 독립적으로 진행 가능 | `develop` |
+
+60 FPS 프레임타임 측정은 별도 브랜치 없이 `render-prototype`이 `develop`에 병합된 후 공동 확인한다.
+
+**충돌 방지 규칙**: `package.json`/`tsconfig.json` 등 프로젝트 설정 파일은 `repo-scaffold`에서만 만들고, 이후 브랜치는 이를 베이스로 시작한다 — 설정 파일을 여러 브랜치에서 동시에 건드리지 않는다.
+
+**최종 배포 병합**: Phase 1 검증 기준을 모두 통과하고 `develop`이 안정되면, 배영환이 `develop` → `main` PR을 생성·머지한다.
+
 ## 검증 기준
 
 - [ ] 그림자 선분이 광원-캐릭터 위치에 맞춰 매 프레임 시각적으로 정확히 그려짐
