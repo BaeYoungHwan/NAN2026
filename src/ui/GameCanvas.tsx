@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
 import { advanceRound, isGuideVisible, type Round } from "../core/round";
@@ -20,6 +20,18 @@ import { drawStage } from "./drawStage";
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 const GOAL_RADIUS = 40; // 골 도달 판정 반경(px)
 
+export interface GameCanvasHandle {
+  /** 캐릭터·그림자 각도를 스폰 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
+  restart: () => void;
+}
+
+interface GameCanvasProps {
+  /** 사망(정렬 이탈) 이벤트가 발생할 때만 호출된다 — 매 프레임 호출되지 않음. */
+  onDeathCountChange?: (count: number) => void;
+  /** 라운드가 바뀔 때만 호출된다(1R→2R→3R) — 매 프레임 호출되지 않음. */
+  onRoundChange?: (round: Round) => void;
+}
+
 /**
  * 두 객체를 동시에 조종하는 프로토타입 (ADR-002):
  * - 캐릭터는 WASD로 이동 (벽 충돌 반영)
@@ -31,7 +43,10 @@ const GOAL_RADIUS = 40; // 골 도달 판정 반경(px)
  *   전체 클리어다. 1R은 안전 구역 가이드라인(부채꼴)을 보여주고, 2R부터는
  *   가이드라인을 숨긴다(그림자 색상 피드백은 유지) — PRD §7-1.
  */
-function GameCanvas() {
+const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
+  { onDeathCountChange, onRoundChange },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useKeyboardInput();
   const [stage] = useState<Stage>(() => generateStage(DEFAULT_SEED));
@@ -41,6 +56,18 @@ function GameCanvas() {
   const deathCountRef = useRef(0);
   const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      restart: () => {
+        characterRef.current = { ...stage.spawn };
+        shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+        clearedRef.current = false;
+      },
+    }),
+    [stage],
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -53,70 +80,65 @@ function GameCanvas() {
     let lastTime = performance.now();
 
     const draw = (time: number) => {
-      if (clearedRef.current) return;
-
       const deltaSeconds = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
 
-      characterRef.current = moveCharacter(characterRef.current, inputRef.current, deltaSeconds, canOccupy);
+      if (!clearedRef.current) {
+        characterRef.current = moveCharacter(characterRef.current, inputRef.current, deltaSeconds, canOccupy);
 
-      if (inputRef.current.rotateCW) {
-        shadowAngleRef.current += ROTATION_SPEED * deltaSeconds;
-      }
-      if (inputRef.current.rotateCCW) {
-        shadowAngleRef.current -= ROTATION_SPEED * deltaSeconds;
-      }
+        if (inputRef.current.rotateCW) {
+          shadowAngleRef.current += ROTATION_SPEED * deltaSeconds;
+        }
+        if (inputRef.current.rotateCCW) {
+          shadowAngleRef.current -= ROTATION_SPEED * deltaSeconds;
+        }
 
-      const natural = naturalAngle(stage.lightPos, characterRef.current);
-      const aligned = isShadowAligned(shadowAngleRef.current, natural, SAFE_ANGLE_TOLERANCE);
+        const natural = naturalAngle(stage.lightPos, characterRef.current);
+        const aligned = isShadowAligned(shadowAngleRef.current, natural, SAFE_ANGLE_TOLERANCE);
 
-      if (!aligned) {
-        characterRef.current = { ...stage.spawn };
-        shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
-        deathCountRef.current += 1;
-      }
-
-      const distanceToGoal = Math.hypot(
-        characterRef.current.x - stage.goal.x,
-        characterRef.current.y - stage.goal.y,
-      );
-      if (distanceToGoal <= GOAL_RADIUS) {
-        const { round, stageCleared } = advanceRound(roundRef.current);
-        roundRef.current = round;
-        if (stageCleared) {
-          clearedRef.current = true;
-        } else {
+        if (!aligned) {
           characterRef.current = { ...stage.spawn };
           shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+          deathCountRef.current += 1;
+          onDeathCountChange?.(deathCountRef.current);
+        }
+
+        const distanceToGoal = Math.hypot(
+          characterRef.current.x - stage.goal.x,
+          characterRef.current.y - stage.goal.y,
+        );
+        if (distanceToGoal <= GOAL_RADIUS) {
+          const { round, stageCleared } = advanceRound(roundRef.current);
+          roundRef.current = round;
+          onRoundChange?.(round);
+          if (stageCleared) {
+            clearedRef.current = true;
+          } else {
+            characterRef.current = { ...stage.spawn };
+            shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+          }
         }
       }
 
-      renderFrame(
-        ctx,
-        stage,
-        characterRef.current,
-        shadowAngleRef.current,
-        deathCountRef.current,
-        roundRef.current,
-        clearedRef.current,
-      );
+      renderFrame(ctx, stage, characterRef.current, shadowAngleRef.current, roundRef.current, clearedRef.current);
 
       frameId = requestAnimationFrame(draw);
     };
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, stage, canOccupy]);
+  }, [inputRef, stage, canOccupy, onDeathCountChange, onRoundChange]);
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
-}
+});
+
+export default GameCanvas;
 
 function renderFrame(
   ctx: CanvasRenderingContext2D,
   stage: Stage,
   characterPos: Point,
   shadowAngle: number,
-  deathCount: number,
   round: Round,
   cleared: boolean,
 ) {
@@ -168,13 +190,6 @@ function renderFrame(
   ctx.arc(characterPos.x, characterPos.y, CHARACTER_RADIUS, 0, Math.PI * 2);
   ctx.fill();
 
-  // HUD
-  ctx.fillStyle = "#eee";
-  ctx.font = "16px sans-serif";
-  ctx.fillText("WASD 이동 / , . 그림자 회전 — 주황 원(골)까지 이동하세요", 16, 24);
-  ctx.fillText(`라운드: ${round}R`, 16, 46);
-  ctx.fillText(`사망 횟수: ${deathCount}`, 16, 68);
-
   if (cleared) {
     ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -185,5 +200,3 @@ function renderFrame(
     ctx.textAlign = "left";
   }
 }
-
-export default GameCanvas;
