@@ -10,7 +10,7 @@
 - [x] `/init-project` 실행 완료
 - [x] 게임 주제/컨셉 확정 — Shadow-Step, 그림자 회피 액션 퍼즐
 - [x] 기술 스택 확정 — TypeScript + React + HTML5 Canvas
-- [x] `docs/design-docs/architecture-v1.md` 검토 및 확정 — 그림자 경계 판정 방식 확정 (`ADR-001`)
+- [x] `docs/design-docs/architecture-v1.md` 검토 및 확정 — 그림자 각도 판정 방식 확정 (`ADR-002`, `ADR-001` 대체)
 - [ ] `docs/design-docs/ARD-v1.md` 비기능 요건 확정
 - [x] Phase 분할 후 `docs/exec-plans/active/`에 실행 계획 생성 — [`phase-1-foundation.md`](docs/exec-plans/active/phase-1-foundation.md)
 
@@ -18,22 +18,22 @@
 
 ## P0 — 기반 구축
 
-- [ ] 레포 초기화 및 폴더 구조 생성 (src/, tests/ 등)
-- [ ] React + TypeScript + Canvas 셋업 및 Hello World 확인
-- [ ] 그림자 각도/궤적 계산 로직 프로토타입 스파이크 (핵심 재미 검증)
-- [ ] GitHub Pages 배포 파이프라인 초안 구성 (심사자가 링크만으로 플레이 가능해야 함)
+- [x] 레포 초기화 및 폴더 구조 생성 (src/, tests/ 등)
+- [x] React + TypeScript + Canvas 셋업 및 Hello World 확인
+- [x] 그림자 각도 계산·이중 조작 프로토타입 스파이크 (핵심 재미 검증, 브라우저 실측 완료)
+- [x] GitHub Pages 배포 파이프라인 초안 구성 (심사자가 링크만으로 플레이 가능해야 함)
 
 ---
 
 ## P1 — MVP 핵심 기능
 
-- [ ] WASD / 방향키 기반 캐릭터 이동 시스템
-- [ ] 광원(태양) 고정 위치 지정 및 캐릭터 위치 기반 실시간 그림자 궤적/각도 계산 (ShadowCaster — 선분 모델)
-- [ ] 그림자 경계 이탈 판정 (즉사 및 스테이지 리셋, 기하학적/벡터 방식 — ContainmentJudge)
-- [ ] 스테이지 지형·광원 위치·안전 경계 다각형 절차적 생성 (Procedural Generation)
+- [x] WASD / 방향키 기반 캐릭터 이동 시스템
+- [x] `,`/`.` 기반 그림자 직접 회전 (ShadowCaster — 각도 모델, 광원 위치와 무관하게 유지)
+- [x] 그림자 각도 이탈 판정 (즉사 및 스테이지 리셋 — ContainmentJudge, 각도 허용치 비교)
+- [ ] 스테이지 지형·광원 위치 절차적 생성 (Procedural Generation)
 - [ ] 플레이어 이동 패턴 학습 → 자주 가는 동선 차단 AI 알고리즘
 - [ ] 라운드 진행 시스템 — 1R(안전 경계 가이드라인 표시) → 2R(가이드라인 제거) → 3R(디메리트 적용, 4R은 데모 범위 밖)
-- [ ] 3R 디메리트 종류 확정 및 구현 (예: 조작키 반전, 안전 경계 축소)
+- [ ] 3R 디메리트 종류 확정 및 구현 (예: 조작키 반전, 허용 각도 축소)
 - [ ] 저승사자 NPC 대사 시스템 (텍스트 대사 박스 — 튜토리얼 안내 겸 병맛 코미디, 애니메이션·음성 없음)
 - [ ] 오프닝/엔딩 컷신 (텍스트+정적 이미지 슬라이드, 애니메이션·동영상 없음)
 - [ ] 실패 시 즉시 재시작(리트라이) 흐름
