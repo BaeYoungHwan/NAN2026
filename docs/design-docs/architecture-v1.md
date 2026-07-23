@@ -23,7 +23,8 @@ NHN NAN2026 해커톤 사전과제 제출용 웹 게임 "Shadow-Step"(가제). �
     ├──▶ [Round State (1R 가이드라인 표시 → 2R 제거 → 3R 디메리트 적용, 4R은 데모 범위 밖)]
     ├──▶ [Canvas Render/Game Loop (캐릭터·그림자·안전 구역 부채꼴 렌더링, 라운드에 따라 가이드라인 표시 여부 결정)]
     ├──▶ [Shadow System (ShadowCaster: 광원+캐릭터 위치 → 안전 구역 자연 각도 계산, 캐릭터 위치+회전 입력 → 그림자 각도·끝점 계산 / ContainmentJudge: 그림자 각도가 안전 구역(자연 각도 ± 허용치) 안인지 판정)]
-    ├──▶ [Procedural Generation (스테이지 지형 + 광원 위치 절차 생성)]
+    ├──▶ [Physics (character.ts: 축 분리 이동 / collider.ts: 타일 그리드 기반 벽 충돌판정 — 그림자 판정과 무관, 캐릭터 이동에만 관여)]
+    ├──▶ [Procedural Generation (stageGenerator.ts: 시드 기반 random-walk carve로 통로·스폰·골·광원 위치 생성)]
     ├──▶ [Pattern-Learning AI (플레이어 이동 동선 학습 → 차단 로직)]
     └──▶ [Local State (localStorage — 진행도 등, 필요 시)]
 
@@ -36,8 +37,8 @@ NHN NAN2026 해커톤 사전과제 제출용 웹 게임 "Shadow-Step"(가제). �
 src/
 ├── ui/             # React 컴포넌트 (타이틀, HUD, 재시작/클리어 화면)
 ├── shadow/         # ShadowCaster(자연 각도·그림자 끝점 계산) + ContainmentJudge(각도 허용치 판정) — shadow-physics 도메인
-├── physics/        # 캐릭터 이동(character.ts), 지형(벽) 충돌 등 기본 물리
-├── procgen/        # 스테이지 지형·광원 위치 절차적 생성
+├── physics/        # character.ts(축 분리 이동) + collider.ts(타일 그리드 벽 충돌판정)
+├── procgen/        # stageGenerator.ts — 시드 기반 통로 carve, 스폰·골·광원 위치 생성
 ├── ai/             # 이동 패턴 학습 및 동선 차단 알고리즘
 ├── assets/         # 이미지/사운드/폰트
 └── core/           # 게임 루프, 입력 처리, 라운드 상태(1R~3R) 관리, 공통 유틸
@@ -46,19 +47,26 @@ src/
 ## 4. 데이터 흐름
 
 ```
-[WASD 입력] → [캐릭터 위치 갱신(physics, 벽 충돌 반영)] ─┐
-                                                          │
-[,/. 입력] → [그림자 각도 갱신(shadow, 독립 상태)] ───────┤
-                                                          ▼
+[앱 시작] → generateStage(seed) → Stage { lightPos, grid, spawn, goal } (procgen, 1회 생성)
+         → createGridCollider(grid, radius) (physics, 1회 생성)
+
+매 프레임:
+[WASD 입력] → [moveCharacter: 벽 충돌(canOccupy) 반영, 축 분리 이동(physics)] ─┐
+                                                                              │
+[,/. 입력] → [그림자 각도 갱신(shadow, 독립 상태)] ───────────────────────────┤
+                                                                              ▼
                               [ShadowCaster: 안전 구역 자연 각도 재계산(shadow)]
-                                                          │
-                                                          ▼
+                                                                              │
+                                                                              ▼
                               [ContainmentJudge: |그림자각 - 자연각| ≤ 허용치? (shadow)]
-                                                          │
+                                                                              │
                                             이탈 → 즉사·리셋(캐릭터+그림자각 모두 스폰값으로) / 정렬 → 계속
-                                                          │
-                                                          ▼
-                                            [Canvas 렌더링(core) → 화면 출력]
+                                                                              │
+                                                                              ▼
+                              [골 도달 판정: 거리(캐릭터, goal) ≤ 임계값? → 클리어]
+                                                                              │
+                                                                              ▼
+                                            [drawStage + Canvas 렌더링(ui) → 화면 출력]
         │
         ▼
 [동선 기록 → 패턴 학습(ai)] → [다음 스테이지 절차 생성 시 학습 결과 반영(procgen)]
@@ -74,6 +82,8 @@ src/
 | UI/렌더링 | React + HTML5 Canvas | UI는 React 선언적 관리, 그림자 물리는 Canvas 직접 제어로 60 FPS 확보 | - |
 | 그림자 판정 방식 | 각도 허용치 비교 (자연 각도 ± 허용치) | 그림자가 캐릭터에 부착된 독립 회전 상태이고 안전 구역도 캐릭터에 부착되므로, 레벨 고정 폴리곤 포함 판정(ADR-001)이 아니라 두 각도를 비교하는 방식이 실제 게임 구조와 일치. readback 없는 단순 연산이라 성능 부담도 없음 | [`ADR-002`](adr/ADR-002-shadow-dual-control.md) (ADR-001 대체) |
 | AI 학습 위치 | 클라이언트(JS) 측 전량 수행 | 서버 비용 최소화, 대회 규정상 서버 기능(랭킹 등) 배제와도 일치 | - |
+| 지형 표현·통로 생성 | 타일 그리드 + 시드 기반 random-walk carve | 충돌판정이 O(1) 셀 조회로 단순·예측 가능, 시드로 재현·디버깅 용이. 정교한 던전 생성기는 18일 일정에 과함 | [`ADR-003`](adr/ADR-003-procgen-corridor-collision.md) |
+| 벽-캐릭터 충돌 | 판정자(predicate) 주입 + 축 분리(X→Y) 이동 | `physics`가 그리드 표현에 결합되지 않아 테스트·표현 교체에 유연. 축 분리로 벽을 따라 자연스럽게 미끄러짐 | [`ADR-003`](adr/ADR-003-procgen-corridor-collision.md) |
 
 ## 6. 비기능 요건 달성 전략
 
