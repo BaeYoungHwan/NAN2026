@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
+import { advanceRound, isGuideVisible, type Round } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
 import { naturalAngle, shadowTip } from "../shadow/shadowCaster";
@@ -25,7 +26,10 @@ const GOAL_RADIUS = 40; // 골 도달 판정 반경(px)
  * - 그림자는 , . 로 직접 회전 (광원 위치와 무관, 자동 복귀 없음)
  * - 안전 구역(캐릭터 뒤, 광원 반대 방향 ± 허용각)은 광원-캐릭터 위치로 매 프레임 재계산됨
  * - 그림자 각도가 안전 구역을 벗어나면 즉시 스폰 위치로 리셋
- * - 골 지점에 도달하면 클리어
+ * - 하나의 스테이지(같은 통로)를 1R→2R→3R 순서로 도전한다. 골 도달 시 다음
+ *   라운드로 진행하고(캐릭터·그림자각 스폰 기준 리셋), 3R 골 도달이 스테이지
+ *   전체 클리어다. 1R은 안전 구역 가이드라인(부채꼴)을 보여주고, 2R부터는
+ *   가이드라인을 숨긴다(그림자 색상 피드백은 유지) — PRD §7-1.
  */
 function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -35,6 +39,7 @@ function GameCanvas() {
   const characterRef = useRef<Point>({ ...stage.spawn });
   const shadowAngleRef = useRef(naturalAngle(stage.lightPos, stage.spawn));
   const deathCountRef = useRef(0);
+  const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
 
   useEffect(() => {
@@ -76,10 +81,25 @@ function GameCanvas() {
         characterRef.current.y - stage.goal.y,
       );
       if (distanceToGoal <= GOAL_RADIUS) {
-        clearedRef.current = true;
+        const { round, stageCleared } = advanceRound(roundRef.current);
+        roundRef.current = round;
+        if (stageCleared) {
+          clearedRef.current = true;
+        } else {
+          characterRef.current = { ...stage.spawn };
+          shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+        }
       }
 
-      renderFrame(ctx, stage, characterRef.current, shadowAngleRef.current, deathCountRef.current, clearedRef.current);
+      renderFrame(
+        ctx,
+        stage,
+        characterRef.current,
+        shadowAngleRef.current,
+        deathCountRef.current,
+        roundRef.current,
+        clearedRef.current,
+      );
 
       frameId = requestAnimationFrame(draw);
     };
@@ -97,6 +117,7 @@ function renderFrame(
   characterPos: Point,
   shadowAngle: number,
   deathCount: number,
+  round: Round,
   cleared: boolean,
 ) {
   ctx.fillStyle = "#111";
@@ -107,22 +128,24 @@ function renderFrame(
   const natural = naturalAngle(stage.lightPos, characterPos);
   const aligned = isShadowAligned(shadowAngle, natural, SAFE_ANGLE_TOLERANCE);
 
-  // 안전 구역 — 캐릭터 뒤(광원 반대 방향) ± 허용각 부채꼴
-  ctx.beginPath();
-  ctx.moveTo(characterPos.x, characterPos.y);
-  ctx.arc(
-    characterPos.x,
-    characterPos.y,
-    SAFE_ZONE_RADIUS,
-    natural - SAFE_ANGLE_TOLERANCE,
-    natural + SAFE_ANGLE_TOLERANCE,
-  );
-  ctx.closePath();
-  ctx.fillStyle = "rgba(74, 144, 217, 0.25)";
-  ctx.fill();
-  ctx.strokeStyle = "#4a90d9";
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
+  if (isGuideVisible(round)) {
+    ctx.beginPath();
+    ctx.moveTo(characterPos.x, characterPos.y);
+    ctx.arc(
+      characterPos.x,
+      characterPos.y,
+      SAFE_ZONE_RADIUS,
+      natural - SAFE_ANGLE_TOLERANCE,
+      natural + SAFE_ANGLE_TOLERANCE,
+    );
+    ctx.closePath();
+    ctx.fillStyle = "rgba(74, 144, 217, 0.25)";
+    ctx.fill();
+    ctx.strokeStyle = "#4a90d9";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 
   // 광원
   ctx.fillStyle = "#f5d547";
@@ -130,7 +153,7 @@ function renderFrame(
   ctx.arc(stage.lightPos.x, stage.lightPos.y, 8, 0, Math.PI * 2);
   ctx.fill();
 
-  // 그림자 — 정렬 여부에 따라 색을 바꿔 즉각적인 시각 피드백을 준다
+  // 그림자 — 정렬 여부에 따라 색을 바꿔 즉각적인 시각 피드백을 준다 (라운드 무관 항상 표시)
   const tip = shadowTip(characterPos, shadowAngle, SHADOW_LENGTH);
   ctx.strokeStyle = aligned ? "#4caf50" : "#e53935";
   ctx.lineWidth = 3;
@@ -149,7 +172,8 @@ function renderFrame(
   ctx.fillStyle = "#eee";
   ctx.font = "16px sans-serif";
   ctx.fillText("WASD 이동 / , . 그림자 회전 — 주황 원(골)까지 이동하세요", 16, 24);
-  ctx.fillText(`사망 횟수: ${deathCount}`, 16, 46);
+  ctx.fillText(`라운드: ${round}R`, 16, 46);
+  ctx.fillText(`사망 횟수: ${deathCount}`, 16, 68);
 
   if (cleared) {
     ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
