@@ -19,7 +19,7 @@ NHN NAN2026 해커톤 사전과제 제출용 웹 게임 "Shadow-Step"(가제). �
         │
         ▼
 [게임 클라이언트 (React + TypeScript + HTML5 Canvas)]
-    ├──▶ [React UI Layer (타이틀, 조작법, 재시작 버튼, 클리어 표시, 현재 라운드 표시)]
+    ├──▶ [React UI Layer (타이틀, 조작법, 재시작 버튼, 클리어 표시, 현재 라운드 표시, 저승사자 대사 박스, 오프닝/엔딩 컷신 슬라이드)]
     ├──▶ [Round State (1R 가이드라인 표시 → 2R 제거 → 3R 디메리트 적용, 4R은 데모 범위 밖)]
     ├──▶ [Canvas Render/Game Loop (캐릭터·그림자·안전 경계 렌더링, 라운드에 따라 경계 가이드라인 표시 여부 결정)]
     ├──▶ [Shadow System (ShadowCaster: 광원+캐릭터 위치 → 그림자 선분 계산 / ContainmentJudge: 선분이 안전 경계 다각형 안에 있는지 판정)]
