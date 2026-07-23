@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { Point } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
 import { moveCharacter } from "../physics/character";
@@ -12,6 +12,16 @@ const CHARACTER_RADIUS = 10;
 const CANVAS_BOUNDS = { minX: 0, minY: 0, maxX: CANVAS_WIDTH, maxY: CANVAS_HEIGHT };
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 
+export interface GameCanvasHandle {
+  /** 캐릭터·그림자 각도를 스폰 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
+  restart: () => void;
+}
+
+interface GameCanvasProps {
+  /** 사망(정렬 이탈) 이벤트가 발생할 때만 호출된다 — 매 프레임 호출되지 않음. */
+  onDeathCountChange?: (count: number) => void;
+}
+
 /**
  * 두 객체를 동시에 조종하는 프로토타입 (ADR-002):
  * - 캐릭터는 WASD로 이동
@@ -19,12 +29,22 @@ const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
  * - 안전 구역(캐릭터 뒤, 광원 반대 방향 ± 허용각)은 광원-캐릭터 위치로 매 프레임 재계산됨
  * - 그림자 각도가 안전 구역을 벗어나면 즉시 스폰 위치로 리셋
  */
-function GameCanvas() {
+const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
+  { onDeathCountChange },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useKeyboardInput();
   const characterRef = useRef<Point>({ ...STATIC_STAGE.spawn });
   const shadowAngleRef = useRef(naturalAngle(STATIC_STAGE.lightPos, STATIC_STAGE.spawn));
   const deathCountRef = useRef(0);
+
+  useImperativeHandle(ref, () => ({
+    restart: () => {
+      characterRef.current = { ...STATIC_STAGE.spawn };
+      shadowAngleRef.current = naturalAngle(STATIC_STAGE.lightPos, STATIC_STAGE.spawn);
+    },
+  }));
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -61,26 +81,24 @@ function GameCanvas() {
         characterRef.current = { ...STATIC_STAGE.spawn };
         shadowAngleRef.current = naturalAngle(STATIC_STAGE.lightPos, STATIC_STAGE.spawn);
         deathCountRef.current += 1;
+        onDeathCountChange?.(deathCountRef.current);
       }
 
-      renderFrame(ctx, characterRef.current, shadowAngleRef.current, deathCountRef.current);
+      renderFrame(ctx, characterRef.current, shadowAngleRef.current);
 
       frameId = requestAnimationFrame(draw);
     };
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef]);
+  }, [inputRef, onDeathCountChange]);
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
-}
+});
 
-function renderFrame(
-  ctx: CanvasRenderingContext2D,
-  characterPos: Point,
-  shadowAngle: number,
-  deathCount: number,
-) {
+export default GameCanvas;
+
+function renderFrame(ctx: CanvasRenderingContext2D, characterPos: Point, shadowAngle: number) {
   ctx.fillStyle = "#111";
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
@@ -124,12 +142,4 @@ function renderFrame(
   ctx.beginPath();
   ctx.arc(characterPos.x, characterPos.y, CHARACTER_RADIUS, 0, Math.PI * 2);
   ctx.fill();
-
-  // HUD
-  ctx.fillStyle = "#eee";
-  ctx.font = "16px sans-serif";
-  ctx.fillText("WASD 이동 / , . 그림자 회전 — 파란 부채꼴을 벗어나면 리셋", 16, 24);
-  ctx.fillText(`사망 횟수: ${deathCount}`, 16, 46);
 }
-
-export default GameCanvas;
