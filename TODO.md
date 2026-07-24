@@ -34,12 +34,12 @@
 - [x] 벽-캐릭터 충돌판정 (축 분리 이동, 벽 슬라이딩)
 - [x] 골 도달 시 클리어 판정
 - [ ] 플레이어 이동 패턴 학습 → 자주 가는 동선 차단 AI 알고리즘
-- [x] 라운드 진행 시스템 — 1R(안전 구역 가이드라인 표시) → 2R(가이드라인 제거) → 3R(골 도달 시 스테이지 클리어, 4R은 데모 범위 밖) — `src/core/round.ts`(`advanceRound`/`isGuideVisible`), `feature/round-system` 병합 완료
+- [x] 라운드 진행 시스템 — 1R(안전 구역 가이드라인 표시) → 2R(가이드라인 제거) → 3R(디메리트 적용, 4R은 데모 범위 밖) — `src/core/round.ts`(`advanceRound`/`isGuideVisible`), `feature/round-system` 병합 완료
 - [x] 3R 디메리트 종류 확정 및 구현 (예: 조작키 반전, 허용 각도 축소) — `src/core/round.ts`(`effectiveAngleTolerance`/`controlsReversed`), 허용 각도 절반 축소 + WASD 반전으로 구현 완료
-- [ ] 저승사자 NPC 대사 시스템 (텍스트 대사 박스 — 튜토리얼 안내 겸 병맛 코미디, 애니메이션·음성 없음)
-- [ ] 오프닝/엔딩 컷신 (텍스트+정적 이미지 슬라이드, 애니메이션·동영상 없음)
+- [x] 저승사자 NPC 대사 시스템 (텍스트 대사 박스 — 튜토리얼/사망/라운드클리어 트리거, `DialogueBox.tsx`+`content/reaperLines.ts`, 스크립트는 초안이며 추후 교체 예정)
+- [x] 오프닝/엔딩 컷신 (텍스트 슬라이드 — `CutsceneSlide.tsx`+`content/cutsceneSlides.ts`, 정적 이미지는 아직 미포함·추후 에셋 확정 시 추가)
 - [x] 실패 시 즉시 재시작(리트라이) 흐름 (캔버스 HUD 수준 — 정식 React UI는 "최소 UI" 항목에서 별도 구현)
-- [ ] 최소 UI (조작법 안내, 재시작 버튼, 클리어 표시, 현재 라운드 표시 — React 컴포넌트로 정식 구현)
+- [x] 최소 UI (조작법 안내, 재시작 버튼, 클리어 표시, 현재 라운드 표시 — `HUD.tsx`/`RestartButton.tsx` React 컴포넌트로 구현 완료)
 
 ---
 
