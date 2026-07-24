@@ -24,5 +24,11 @@ export interface Stage {
   lightPos: Point;
   grid: TileGrid;
   spawn: Point;
+  /**
+   * 라운드 전환 세이브 포인트 — 통과하면 해당 라운드가 끝나고 다음 라운드로 즉시
+   * 전환된다(스폰으로 되돌아가지 않음). 이후 사망 시 리스폰 지점도 이 지점으로
+   * 바뀐다. 배열 순서가 라운드 순서(1R→2R 전환점, 2R→3R 전환점, ...)와 같다.
+   */
+  checkpoints: Point[];
   goal: Point;
 }

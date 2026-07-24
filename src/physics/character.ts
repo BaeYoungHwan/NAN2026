@@ -58,3 +58,8 @@ export function moveCharacter(
 
   return next;
 }
+
+/** 3R 디메리트 — 이동 입력의 상하좌우를 반전시킨다(대각선 입력도 각 축이 반전됨). */
+export function reverseMoveInput(input: MoveInput): MoveInput {
+  return { up: input.down, down: input.up, left: input.right, right: input.left };
+}

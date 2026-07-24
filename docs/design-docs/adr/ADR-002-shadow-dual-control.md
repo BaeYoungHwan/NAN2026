@@ -4,6 +4,12 @@
 > 날짜: 2026-07-23
 > 결정자: 배영환, 송원호
 > 이전 결정: [ADR-001](ADR-001-shadow-boundary-judgment.md) (Superseded)
+>
+> **2026-07-24 추가**: 라운드 시스템에 세이브 포인트(체크포인트) 개념이 도입되면서 "구현 시 주의사항"의
+> "리셋 시 `naturalAngle(light, spawn)`" 서술은 정정이 필요하다 — 사망 시 리스폰 지점은 스테이지의
+> 고정 `spawn`이 아니라 **마지막으로 통과한 세이브 포인트**(아직 하나도 통과 전이면 spawn)다. 공식은
+> `naturalAngle(light, savePoint)`로 일반화된 것으로 읽는다. 세부는 `src/core/stage.ts`의 `checkpoints`
+> 필드와 `src/ui/GameCanvas.tsx`의 `savePointRef` 참고.
 
 ## 컨텍스트
 
