@@ -12,7 +12,9 @@ const PATH_STEPS = 40;
 const STRAIGHT_BIAS = 0.75; // 직진 방향이 있을 때 그 방향을 고를 확률
 const MIN_SPAN_CELLS = 10; // 스폰-골 최소 직선거리(칸) — 미달이면 재시도
 const MAX_GENERATION_ATTEMPTS = 5;
-const LIGHT_Y = 30;
+
+/** 가로등 배치 간격(경로 스텝 기준) — 임시값. 실제 값은 P1 플레이테스트로 확정한다 (PRD §12, ADR-004). */
+const LIGHT_SPACING_STEPS = 8;
 
 export const DEFAULT_SEED = 12345;
 
@@ -24,6 +26,16 @@ export const SAFE_ANGLE_TOLERANCE = Math.PI / 6; // ±30도
 
 /** 그림자 회전 속도 (라디안/초) — 임시 상수. */
 export const ROTATION_SPEED = Math.PI; // 180도/초
+
+/**
+ * 최근접 광원이 바뀌는 순간, 이 시간(초) 동안은 정렬 판정을 건너뛴다 — 임시 상수.
+ * 광원 전환 시 요구 각도가 최대 180도 가까이 순간적으로 바뀔 수 있는데(ADR-004),
+ * 회전 속도(ROTATION_SPEED)로는 한 프레임 안에 따라잡을 수 없어 무조건 죽게 된다.
+ * 전환 직후 잠깐의 유예를 둬서 플레이어가 새 각도로 돌릴 시간을 준다.
+ * 값 산정: 최악의 경우(180도) 회전에 걸리는 시간(π/ROTATION_SPEED ≈ 1초) + 반응 여유.
+ * 실제 값은 P1 플레이테스트로 확정한다 (PRD §12).
+ */
+export const LIGHT_SWITCH_GRACE_SECONDS = 1.2;
 
 /** 결정론적 시드 기반 PRNG (mulberry32) — 같은 시드는 항상 같은 스테이지를 만든다. */
 function createRng(seed: number): () => number {
@@ -173,10 +185,81 @@ export function generateStage(seed: number, extraWalls?: Point[]): Stage {
     }
   }
 
-  // 광원은 통로 형태와 무관하게 독립 배치한다 — 화면 상단 고정 y, x만 랜덤.
-  const lightPos: Point = { x: createRng(currentSeed)() * CANVAS_WIDTH, y: LIGHT_Y };
+  // 광원(가로등)은 통로 경로를 따라 일정 간격으로, 통로 바깥(벽 셀)에 배치한다 —
+  // 캐릭터가 지나가는 동안 가장 가까운 가로등이 계속 바뀌면서 안전구역 각도도
+  // 함께 바뀌게 하되(ADR-004), 광원 자체는 캐릭터가 물리적으로 닿을 수 없는
+  // 벽 위에 있어 스폰·골·체크포인트 등 walkable 지점과 좌표가 겹칠 일이 없다.
+  const lightSources = placeLightSources(grid, path);
 
-  return { lightPos, grid, spawn, checkpoints, goal, aiBlockedCells };
+  return { lightSources, grid, spawn, checkpoints, goal, aiBlockedCells };
+}
+
+/** 인접 벽 셀을 찾을 때 시도할 오프셋 — 가까운 것부터, 상하좌우 다음 대각선/2칸. */
+const WALL_SEARCH_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, -1],
+  [1, -1],
+  [-1, 1],
+  [2, 0],
+  [-2, 0],
+  [0, 2],
+  [0, -2],
+];
+
+/**
+ * 주어진 셀에서 가장 가까운 벽 셀(walkable 아님)을 찾는다 — 가로등을 통로가
+ * 아니라 통로 옆 벽에 배치해, 캐릭터가 물리적으로 닿을 수 없게 하기 위함.
+ * 찾지 못하면(그리드 가장자리 등 드문 경우) null을 반환한다.
+ */
+function findAdjacentWallCell(grid: TileGrid, cell: Cell): Cell | null {
+  for (const [dc, dr] of WALL_SEARCH_OFFSETS) {
+    const col = cell.col + dc;
+    const row = cell.row + dr;
+    if (col >= 0 && col < grid.cols && row >= 0 && row < grid.rows && grid.cells[row * grid.cols + col] === 1) {
+      return { col, row };
+    }
+  }
+  return null;
+}
+
+/**
+ * 통로 경로를 따라 LIGHT_SPACING_STEPS 간격으로, 경로 옆 벽 셀에 가로등을
+ * 배치한다(ADR-004) — 벽 위이므로 캐릭터가 닿을 수 없고, walkable 지점(스폰·
+ * 골·체크포인트)과 좌표가 겹칠 일도 구조적으로 없다. 경로 끝(골 근처)이
+ * 마지막 간격에 걸리지 않으면 골 쪽에도 하나 추가해 고르게 분포시킨다.
+ */
+function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
+  const sources: Point[] = [];
+
+  const addNearWall = (cell: Cell) => {
+    const wallCell = findAdjacentWallCell(grid, cell);
+    if (wallCell) {
+      sources.push(cellCenter(grid.tileSize, wallCell.col, wallCell.row));
+    }
+  };
+
+  for (let i = 0; i < path.length; i += LIGHT_SPACING_STEPS) {
+    addNearWall(path[i]);
+  }
+
+  const lastIdx = path.length - 1;
+  if (lastIdx % LIGHT_SPACING_STEPS !== 0) {
+    addNearWall(path[lastIdx]);
+  }
+
+  // 경로 전체가 벽에 인접한 셀을 하나도 못 찾는 극단적 경우를 대비해(이론상
+  // 거의 발생하지 않음 — 통로 폭 2칸은 20x15 그리드에서 항상 벽에 둘러싸임)
+  // 최소 1개는 보장한다.
+  if (sources.length === 0) {
+    const midCell = path[Math.floor(path.length / 2)];
+    sources.push(cellCenter(grid.tileSize, midCell.col, midCell.row));
+  }
+
+  return sources;
 }
 
 /**
