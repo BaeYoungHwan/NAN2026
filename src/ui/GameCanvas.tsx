@@ -67,10 +67,9 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
         roundRef.current = 1;
         clearedRef.current = false;
-        onRoundChange?.(1, false);
       },
     }),
-    [stage, onRoundChange],
+    [stage],
   );
 
   useEffect(() => {

@@ -20,6 +20,7 @@ export const DEATH_LINES: readonly string[] = [
   "그림자가 삐끗하면 바로 저 세상입니다. 다시 한번!",
 ];
 
+/** 1은 advanceRound()가 절대 반환하지 않는 값 — Record<Round, string> 타입을 만족시키기 위한 자리만 채운 값이며 실제로 쓰이지 않는다. */
 export const ROUND_ADVANCE_LINES: Readonly<Record<Round, string>> = {
   1: "",
   2: "오, 2라운드! 이제부터는 안전 구역 표시를 안 해드려요. 알아서 잘 맞춰보세요.",

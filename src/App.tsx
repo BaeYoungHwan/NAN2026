@@ -38,6 +38,11 @@ function App() {
     setDialogueQueue((queue) => queue.slice(1));
   };
 
+  const handleRestart = () => {
+    setRound(1);
+    gameCanvasRef.current?.restart();
+  };
+
   return (
     <div style={containerStyle}>
       <GameCanvas
@@ -47,7 +52,7 @@ function App() {
         inputDisabled={dialogueQueue.length > 0}
       />
       <HUD round={round} deathCount={deathCount} />
-      <RestartButton onRestart={() => gameCanvasRef.current?.restart()} />
+      <RestartButton onRestart={handleRestart} />
       <DialogueBox queue={dialogueQueue} onAdvance={handleDialogueAdvance} autoDismissMs={dialogueAutoDismissMs} />
     </div>
   );
