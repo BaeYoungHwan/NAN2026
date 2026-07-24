@@ -42,8 +42,8 @@ function DialogueBox({ queue, onAdvance, autoDismissMs }: DialogueBoxProps) {
   if (!currentLine) return null;
 
   return (
-    <div style={overlayStyle} onClick={onAdvance}>
-      <div style={boxStyle}>
+    <div style={overlayStyle}>
+      <div style={boxStyle} onClick={onAdvance}>
         <p style={nameStyle}>저승사자</p>
         <p style={lineStyle}>{currentLine}</p>
         {autoDismissMs === undefined && <p style={hintStyle}>클릭 또는 Enter/Space로 계속</p>}
@@ -52,6 +52,9 @@ function DialogueBox({ queue, onAdvance, autoDismissMs }: DialogueBoxProps) {
   );
 }
 
+/** 이 div 자체는 클릭을 받지 않는다(pointerEvents: none) — 화면 전체를 덮는 wrapper가
+ * RestartButton 등 다른 절대 위치 UI의 클릭을 가로채지 않도록, 실제 클릭 캡처는
+ * boxStyle에만 건다. */
 const overlayStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
@@ -59,7 +62,7 @@ const overlayStyle: CSSProperties = {
   alignItems: "flex-end",
   justifyContent: "center",
   paddingBottom: 32,
-  cursor: "pointer",
+  pointerEvents: "none",
 };
 
 const boxStyle: CSSProperties = {
@@ -71,6 +74,8 @@ const boxStyle: CSSProperties = {
   padding: "12px 16px",
   color: "#eee",
   fontFamily: "sans-serif",
+  pointerEvents: "auto",
+  cursor: "pointer",
 };
 
 const nameStyle: CSSProperties = {

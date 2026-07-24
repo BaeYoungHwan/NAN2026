@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Round } from "./core/round";
 import {
@@ -22,26 +22,31 @@ function App() {
   const [dialogueAutoDismissMs, setDialogueAutoDismissMs] = useState<number | undefined>(undefined);
   const gameCanvasRef = useRef<GameCanvasHandle>(null);
 
-  const handleDeathCountChange = (count: number) => {
+  const handleDeathCountChange = useCallback((count: number) => {
     setDeathCount(count);
     setDialogueQueue([pickRandomLine(DEATH_LINES)]);
     setDialogueAutoDismissMs(DEATH_LINE_AUTO_DISMISS_MS);
-  };
+  }, []);
 
-  const handleRoundChange = (nextRound: Round, stageCleared: boolean) => {
+  const handleRoundChange = useCallback((nextRound: Round, stageCleared: boolean) => {
     setRound(nextRound);
-    setDialogueQueue([stageCleared ? STAGE_CLEAR_LINE : ROUND_ADVANCE_LINES[nextRound]]);
-    setDialogueAutoDismissMs(undefined);
-  };
+    // advanceRound()는 1R로 되돌아가지 않으므로 nextRound는 항상 2R 또는 3R이다.
+    if (nextRound !== 1) {
+      setDialogueQueue([stageCleared ? STAGE_CLEAR_LINE : ROUND_ADVANCE_LINES[nextRound]]);
+      setDialogueAutoDismissMs(undefined);
+    }
+  }, []);
 
-  const handleDialogueAdvance = () => {
+  const handleDialogueAdvance = useCallback(() => {
     setDialogueQueue((queue) => queue.slice(1));
-  };
+  }, []);
 
-  const handleRestart = () => {
+  const handleRestart = useCallback(() => {
     setRound(1);
+    setDialogueQueue([]);
+    setDialogueAutoDismissMs(undefined);
     gameCanvasRef.current?.restart();
-  };
+  }, []);
 
   return (
     <div style={containerStyle}>
