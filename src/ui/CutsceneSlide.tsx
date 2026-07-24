@@ -10,8 +10,8 @@ interface CutsceneSlideProps {
 
 /**
  * 오프닝/엔딩 컷신 (PRD §7-2) — 텍스트+정적 이미지 수준의 풀스크린 슬라이드.
- * DialogueBox와 달리 게임 화면 전체를 덮어 진행 중인 조작을 완전히 막는다
- * (컷신 중엔 다른 UI를 조작할 이유가 없으므로 pointerEvents 분리가 불필요).
+ * 배경이 불투명해 GameCanvas·HUD를 완전히 가리지만, RestartButton은 자체
+ * z-index로 이 위에서도 보이고 클릭 가능하다 (컷신 표시 중에도 재시작 가능).
  */
 function CutsceneSlide({ slides, onFinish }: CutsceneSlideProps) {
   const [index, setIndex] = useState(0);
