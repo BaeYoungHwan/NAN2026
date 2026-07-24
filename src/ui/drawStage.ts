@@ -17,6 +17,14 @@ export function drawStage(ctx: CanvasRenderingContext2D, stage: Stage): void {
     }
   }
 
+  // 이동 패턴 학습 AI가 막은 셀 — 일반 벽과 구분되도록 보라색으로 덧칠
+  ctx.fillStyle = "#9c4a9c";
+  for (const cell of stage.aiBlockedCells) {
+    const col = Math.floor(cell.x / grid.tileSize);
+    const row = Math.floor(cell.y / grid.tileSize);
+    ctx.fillRect(col * grid.tileSize, row * grid.tileSize, grid.tileSize, grid.tileSize);
+  }
+
   ctx.fillStyle = "#4a90d9";
   for (const checkpoint of stage.checkpoints) {
     ctx.beginPath();

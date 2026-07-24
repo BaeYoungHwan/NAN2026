@@ -31,4 +31,10 @@ export interface Stage {
    */
   checkpoints: Point[];
   goal: Point;
+  /**
+   * 이동 패턴 학습 AI가 자주 다닌 경로를 학습해 추가로 막은 셀 — 일반 벽과 달리
+   * 렌더링에서 구분 표시한다(어떤 벽이 "AI가 막은 것"인지 플레이어가 알 수 있게).
+   * `generateStage`의 `extraWalls` 인자로 넘긴 셀들이 그대로 담긴다.
+   */
+  aiBlockedCells: Point[];
 }

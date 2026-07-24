@@ -132,8 +132,12 @@ function createEmptyGrid(): TileGrid {
  *
  * 스폰-골 직선거리가 MIN_SPAN_CELLS에 못 미치면(통로가 너무 짧게 뭉치면)
  * 파생 시드로 재시도한다 — 최대 시도 횟수를 넘으면 마지막 결과를 그대로 사용한다.
+ *
+ * `extraWalls`(선택)는 통로를 다 판 뒤에 추가로 벽 처리할 셀 좌표(픽셀)다 —
+ * 이동 패턴 학습 AI(`src/ai/pathBlocker.ts`)가 고른 차단 후보를 넘길 때 쓴다.
+ * carve 자체에는 영향을 주지 않으므로 spawn/checkpoints/goal은 그대로 유지된다.
  */
-export function generateStage(seed: number): Stage {
+export function generateStage(seed: number, extraWalls?: Point[]): Stage {
   const start: Cell = { col: 1, row: GRID_ROWS - 3 };
 
   let currentSeed = seed;
@@ -155,10 +159,19 @@ export function generateStage(seed: number): Stage {
   const goal = cellCenter(grid.tileSize, path[path.length - 1].col, path[path.length - 1].row);
   const checkpoints = computeCheckpoints(grid.tileSize, path);
 
+  const aiBlockedCells = extraWalls ?? [];
+  for (const wall of aiBlockedCells) {
+    const col = Math.floor(wall.x / grid.tileSize);
+    const row = Math.floor(wall.y / grid.tileSize);
+    if (col >= 0 && col < grid.cols && row >= 0 && row < grid.rows) {
+      grid.cells[row * grid.cols + col] = 1;
+    }
+  }
+
   // 광원은 통로 형태와 무관하게 독립 배치한다 — 화면 상단 고정 y, x만 랜덤.
   const lightPos: Point = { x: createRng(currentSeed)() * CANVAS_WIDTH, y: LIGHT_Y };
 
-  return { lightPos, grid, spawn, checkpoints, goal };
+  return { lightPos, grid, spawn, checkpoints, goal, aiBlockedCells };
 }
 
 /**
