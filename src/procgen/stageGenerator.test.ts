@@ -1,45 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { isReachable } from "./reachability";
 import { DEFAULT_SEED, computeCheckpoints, generateStage } from "./stageGenerator";
 
 function isWalkable(stage: ReturnType<typeof generateStage>, point: { x: number; y: number }): boolean {
   const col = Math.floor(point.x / stage.grid.tileSize);
   const row = Math.floor(point.y / stage.grid.tileSize);
   return stage.grid.cells[row * stage.grid.cols + col] === 0;
-}
-
-/** BFS로 스폰에서 골까지 walkable 셀만 지나서 도달 가능한지 확인한다. */
-function isReachable(stage: ReturnType<typeof generateStage>): boolean {
-  const { grid } = stage;
-  const startCol = Math.floor(stage.spawn.x / grid.tileSize);
-  const startRow = Math.floor(stage.spawn.y / grid.tileSize);
-  const goalCol = Math.floor(stage.goal.x / grid.tileSize);
-  const goalRow = Math.floor(stage.goal.y / grid.tileSize);
-
-  const visited = new Set<number>([startRow * grid.cols + startCol]);
-  const queue: Array<[number, number]> = [[startCol, startRow]];
-
-  while (queue.length > 0) {
-    const [col, row] = queue.shift()!;
-    if (col === goalCol && row === goalRow) return true;
-
-    for (const [dc, dr] of [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ]) {
-      const nc = col + dc;
-      const nr = row + dr;
-      if (nc < 0 || nc >= grid.cols || nr < 0 || nr >= grid.rows) continue;
-      const key = nr * grid.cols + nc;
-      if (visited.has(key)) continue;
-      if (grid.cells[key] === 1) continue;
-      visited.add(key);
-      queue.push([nc, nr]);
-    }
-  }
-
-  return false;
 }
 
 describe("generateStage", () => {
@@ -66,7 +32,7 @@ describe("generateStage", () => {
 
   it("스폰에서 골까지 walkable 경로로 도달 가능하다", () => {
     const stage = generateStage(DEFAULT_SEED);
-    expect(isReachable(stage)).toBe(true);
+    expect(isReachable(stage.grid, stage.spawn, stage.goal)).toBe(true);
   });
 
   it("같은 시드는 항상 같은 스테이지를 만든다 (재현성)", () => {

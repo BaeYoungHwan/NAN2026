@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
 import {
@@ -22,6 +22,7 @@ import {
   SHADOW_LENGTH,
   generateStage,
 } from "../procgen/stageGenerator";
+import { applyLearning, cellKey, MAX_AI_BLOCKS } from "../ai/pathBlocker";
 import { drawStage } from "./drawStage";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
@@ -54,6 +55,16 @@ interface GameCanvasProps {
  *   가이드라인(부채꼴)을 보여주고, 2R부터는 가이드라인을 숨긴다(그림자 색상
  *   피드백은 유지). 3R 디메리트: 허용 각도 축소 + WASD 이동키 상하좌우
  *   반전(그림자 회전키는 영향 없음) — PRD §7-1.
+ * - 이동 패턴 학습 AI(단순 빈도 기반, PRD §12): 캐릭터가 새 셀에 들어갈 때마다
+ *   방문 횟수를 누적하고, 재시작 시 가장 자주 지나간 셀 중 스테이지를 풀 수
+ *   없게 만들지 않는 셀만 골라 벽으로 추가한다(`src/ai/pathBlocker.ts`). 학습은
+ *   세션 내에서만 누적되며(새로고침 시 초기화), 라운드/사망 리셋에는 영향 없음.
+ *
+ * 스테이지는 리액트 상태가 아니라 `stageRef`로 들고 있다 — 재시작마다 스테이지
+ * 객체 자체가 바뀌는데(학습 반영), 게임 루프(rAF)가 그 시점에 아직 안 바뀐
+ * 클로저를 참조해 한두 프레임 옛 스테이지로 렌더링되는 걸 막기 위함이다.
+ * 렌더링에 굳이 리액트 리렌더가 필요 없으므로(캔버스 하나만 그리는 구조) 상태로
+ * 둘 이유가 없다.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
   { onDeathCountChange, onRoundChange, inputDisabled = false },
@@ -61,29 +72,42 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useKeyboardInput();
-  const [stage] = useState<Stage>(() => generateStage(DEFAULT_SEED));
-  const canOccupy = useMemo(() => createGridCollider(stage.grid, CHARACTER_RADIUS), [stage]);
-  const characterRef = useRef<Point>({ ...stage.spawn });
-  const shadowAngleRef = useRef(naturalAngle(stage.lightPos, stage.spawn));
+  // useState는 세터를 쓰지 않고 "한 번만 계산되는 초기값" 용도로만 쓴다 —
+  // 실제 최신값은 항상 stageRef로 읽는다(위 주석 참고).
+  const [initialStage] = useState<Stage>(() => generateStage(DEFAULT_SEED));
+  const stageRef = useRef<Stage>(initialStage);
+  const characterRef = useRef<Point>({ ...stageRef.current.spawn });
+  const shadowAngleRef = useRef(naturalAngle(stageRef.current.lightPos, stageRef.current.spawn));
   const deathCountRef = useRef(0);
   const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
   // 마지막으로 통과한 세이브 포인트 — 사망 시 이 지점으로 리스폰한다(스폰 지점 아님).
-  const savePointRef = useRef<Point>({ ...stage.spawn });
+  const savePointRef = useRef<Point>({ ...stageRef.current.spawn });
+  // 이동 패턴 학습 AI — 캐릭터가 지나간 셀 방문 횟수. 세션 내내 누적(재시작해도 초기화 안 함).
+  const visitCountsRef = useRef(new Map<string, number>());
+  // 방문 카운트를 "셀에 들어간 순간"에만 올리기 위한 직전 셀 키(가만히 서 있는 시간은 세지 않음).
+  const lastVisitedCellKeyRef = useRef<string | null>(null);
+  // stage 참조가 바뀔 때만(=재시작 시) 충돌판정 함수를 새로 만든다 — 매 프레임 재생성 방지.
+  const colliderCacheRef = useRef<{ stage: Stage; canOccupy: (point: Point) => boolean } | null>(null);
 
   useImperativeHandle(
     ref,
     () => ({
       restart: () => {
-        characterRef.current = { ...stage.spawn };
-        shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
-        savePointRef.current = { ...stage.spawn };
+        const previousStage = stageRef.current;
+        const nextStage = applyLearning(DEFAULT_SEED, previousStage, visitCountsRef.current, MAX_AI_BLOCKS);
+
+        stageRef.current = nextStage;
+        characterRef.current = { ...nextStage.spawn };
+        shadowAngleRef.current = naturalAngle(nextStage.lightPos, nextStage.spawn);
+        savePointRef.current = { ...nextStage.spawn };
         roundRef.current = 1;
+        lastVisitedCellKeyRef.current = null;
         onRoundChange?.(1, false);
         clearedRef.current = false;
       },
     }),
-    [stage, onRoundChange],
+    [onRoundChange],
   );
 
   useEffect(() => {
@@ -99,12 +123,23 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     const draw = (time: number) => {
       const deltaSeconds = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
+      const stage = stageRef.current;
 
       if (!clearedRef.current && !inputDisabled) {
+        if (colliderCacheRef.current?.stage !== stage) {
+          colliderCacheRef.current = { stage, canOccupy: createGridCollider(stage.grid, CHARACTER_RADIUS) };
+        }
+        const canOccupy = colliderCacheRef.current.canOccupy;
         const moveInput = controlsReversed(roundRef.current)
           ? reverseMoveInput(inputRef.current)
           : inputRef.current;
         characterRef.current = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
+
+        const visitKey = cellKey(stage.grid, characterRef.current);
+        if (visitKey !== lastVisitedCellKeyRef.current) {
+          visitCountsRef.current.set(visitKey, (visitCountsRef.current.get(visitKey) ?? 0) + 1);
+          lastVisitedCellKeyRef.current = visitKey;
+        }
 
         if (inputRef.current.rotateCW) {
           shadowAngleRef.current += ROTATION_SPEED * deltaSeconds;
@@ -145,7 +180,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, stage, canOccupy, onDeathCountChange, onRoundChange, inputDisabled]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled]);
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
 });
