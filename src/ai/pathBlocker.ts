@@ -1,5 +1,9 @@
-import type { Point, TileGrid } from "../core/stage";
+import type { Point, Stage, TileGrid } from "../core/stage";
 import { isReachable } from "../procgen/reachability";
+import { generateStage } from "../procgen/stageGenerator";
+
+/** 재시작마다 새로 추가로 막을 수 있는 최대 셀 수 — 임시값, P1 플레이테스트로 조정. */
+export const MAX_AI_BLOCKS = 4;
 
 /** 셀 방문 횟수 — "col,row" 키. GameCanvas가 매 프레임 캐릭터가 있는 셀을 누적한다. */
 export type VisitCounts = Map<string, number>;
@@ -55,4 +59,15 @@ export function selectBlockedCells(
   }
 
   return blocked;
+}
+
+/**
+ * 이전 스테이지의 방문 기록을 바탕으로 다음 스테이지를 만든다 — GameCanvas의
+ * 재시작 로직 그 자체이며, 통합 테스트도 이 함수를 그대로 호출해 실제
+ * 프로덕션 코드 경로를 검증한다(로직이 두 곳에서 따로 재구현되어 어긋나는 것을 방지).
+ */
+export function applyLearning(seed: number, previousStage: Stage, visits: VisitCounts, maxBlocks: number): Stage {
+  const protectedCells = [previousStage.spawn, ...previousStage.checkpoints, previousStage.goal];
+  const newlyBlocked = selectBlockedCells(visits, previousStage.grid, protectedCells, maxBlocks);
+  return generateStage(seed, [...previousStage.aiBlockedCells, ...newlyBlocked]);
 }

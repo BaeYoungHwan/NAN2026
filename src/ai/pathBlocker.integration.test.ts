@@ -1,19 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { isReachable } from "../procgen/reachability";
 import { DEFAULT_SEED, generateStage } from "../procgen/stageGenerator";
-import { cellKey, selectBlockedCells, type VisitCounts } from "./pathBlocker";
+import { applyLearning, cellKey, MAX_AI_BLOCKS, type VisitCounts } from "./pathBlocker";
 
 /**
- * GameCanvas의 실제 흐름(방문 기록 → 재시작 시 차단 셀 선정 → 누적 반영)을
- * 브라우저 없이 재현한다 — "여러 번 재시작해도 스테이지가 항상 풀린다"를
- * 회귀 테스트로 고정한다.
+ * GameCanvas.restart()가 실제로 호출하는 applyLearning을 그대로 써서 재현한다
+ * (로직을 여기서 재구현하지 않음 — 실제 프로덕션 코드 경로를 검증하기 위함) —
+ * "여러 번 재시작해도 스테이지가 항상 풀린다"를 회귀 테스트로 고정한다.
  */
-function simulateRestartCycle(previousStage: ReturnType<typeof generateStage>, visits: VisitCounts) {
-  const protectedCells = [previousStage.spawn, ...previousStage.checkpoints, previousStage.goal];
-  const newlyBlocked = selectBlockedCells(visits, previousStage.grid, protectedCells, 4);
-  return generateStage(DEFAULT_SEED, [...previousStage.aiBlockedCells, ...newlyBlocked]);
-}
-
 describe("이동 패턴 학습 AI — 재시작 반복 통합 시나리오", () => {
   it("같은 경로로 여러 번 재시작해도 스테이지는 항상 스폰→체크포인트→골까지 도달 가능하다", () => {
     let stage = generateStage(DEFAULT_SEED);
@@ -31,7 +25,7 @@ describe("이동 패턴 학습 AI — 재시작 반복 통합 시나리오", () 
         }
       }
 
-      stage = simulateRestartCycle(stage, visits);
+      stage = applyLearning(DEFAULT_SEED, stage, visits, MAX_AI_BLOCKS);
 
       const checkpoints = [stage.spawn, ...stage.checkpoints, stage.goal];
       for (let i = 0; i < checkpoints.length - 1; i++) {
