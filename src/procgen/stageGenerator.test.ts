@@ -49,6 +49,14 @@ describe("generateStage", () => {
     expect(isWalkable(stage, stage.goal)).toBe(true);
   });
 
+  it("세이브 포인트(체크포인트)가 라운드 수-1개만큼 생성되고 모두 walkable하다", () => {
+    const stage = generateStage(DEFAULT_SEED);
+    expect(stage.checkpoints.length).toBe(2);
+    for (const checkpoint of stage.checkpoints) {
+      expect(isWalkable(stage, checkpoint)).toBe(true);
+    }
+  });
+
   it("스폰에서 골까지 walkable 경로로 도달 가능하다", () => {
     const stage = generateStage(DEFAULT_SEED);
     expect(isReachable(stage)).toBe(true);
@@ -59,6 +67,7 @@ describe("generateStage", () => {
     const b = generateStage(DEFAULT_SEED);
     expect(a.spawn).toEqual(b.spawn);
     expect(a.goal).toEqual(b.goal);
+    expect(a.checkpoints).toEqual(b.checkpoints);
     expect(a.lightPos).toEqual(b.lightPos);
     expect(Array.from(a.grid.cells)).toEqual(Array.from(b.grid.cells));
   });

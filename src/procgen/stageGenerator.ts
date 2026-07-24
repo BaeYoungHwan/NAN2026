@@ -1,3 +1,4 @@
+import { MAX_ROUND } from "../core/round";
 import type { Point, Stage, TileGrid } from "../core/stage";
 
 export const CANVAS_WIDTH = 800;
@@ -152,9 +153,30 @@ export function generateStage(seed: number): Stage {
 
   const spawn = cellCenter(grid.tileSize, path[0].col, path[0].row);
   const goal = cellCenter(grid.tileSize, path[path.length - 1].col, path[path.length - 1].row);
+  const checkpoints = computeCheckpoints(grid.tileSize, path);
 
   // 광원은 통로 형태와 무관하게 독립 배치한다 — 화면 상단 고정 y, x만 랜덤.
   const lightPos: Point = { x: createRng(currentSeed)() * CANVAS_WIDTH, y: LIGHT_Y };
 
-  return { lightPos, grid, spawn, goal };
+  return { lightPos, grid, spawn, checkpoints, goal };
+}
+
+/**
+ * 통로 경로(`path`, 첫 칸이 스폰·마지막 칸이 골)를 라운드 수만큼 균등 분할해
+ * 세이브 포인트를 뽑는다 — 라운드가 3개면 경로를 3구간으로 나누는 2개의
+ * 전환점(1R→2R, 2R→3R)이 나온다. 스폰·골과 겹치지 않도록 인덱스를
+ * [1, path.length - 2] 범위로 고정한다.
+ */
+function computeCheckpoints(tileSize: number, path: Cell[]): Point[] {
+  const checkpointCount = MAX_ROUND - 1;
+  const checkpoints: Point[] = [];
+
+  for (let i = 1; i <= checkpointCount; i++) {
+    const fraction = i / MAX_ROUND;
+    const idx = Math.min(path.length - 2, Math.max(1, Math.round((path.length - 1) * fraction)));
+    const cell = path[idx];
+    checkpoints.push(cellCenter(tileSize, cell.col, cell.row));
+  }
+
+  return checkpoints;
 }

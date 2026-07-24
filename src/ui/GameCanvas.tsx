@@ -1,8 +1,15 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
-import { advanceRound, isGuideVisible, type Round } from "../core/round";
-import { CHARACTER_RADIUS, moveCharacter } from "../physics/character";
+import {
+  advanceRound,
+  controlsReversed,
+  effectiveAngleTolerance,
+  isGuideVisible,
+  roundTarget,
+  type Round,
+} from "../core/round";
+import { CHARACTER_RADIUS, moveCharacter, type MoveInput } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
 import { naturalAngle, shadowTip } from "../shadow/shadowCaster";
 import { isShadowAligned } from "../shadow/containmentJudge";
@@ -18,7 +25,12 @@ import {
 import { drawStage } from "./drawStage";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
-const GOAL_RADIUS = 40; // 골 도달 판정 반경(px)
+const TARGET_RADIUS = 40; // 세이브 포인트·골 도달 판정 반경(px)
+
+/** 3R 디메리트 — WASD 이동키의 상하좌우를 반전시킨다(그림자 회전키는 대상 아님). */
+function reverseControls(input: MoveInput): MoveInput {
+  return { up: input.down, down: input.up, left: input.right, right: input.left };
+}
 
 export interface GameCanvasHandle {
   /** 캐릭터·그림자 각도를 스폰 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
@@ -37,11 +49,14 @@ interface GameCanvasProps {
  * - 캐릭터는 WASD로 이동 (벽 충돌 반영)
  * - 그림자는 , . 로 직접 회전 (광원 위치와 무관, 자동 복귀 없음)
  * - 안전 구역(캐릭터 뒤, 광원 반대 방향 ± 허용각)은 광원-캐릭터 위치로 매 프레임 재계산됨
- * - 그림자 각도가 안전 구역을 벗어나면 즉시 스폰 위치로 리셋
- * - 하나의 스테이지(같은 통로)를 1R→2R→3R 순서로 도전한다. 골 도달 시 다음
- *   라운드로 진행하고(캐릭터·그림자각 스폰 기준 리셋), 3R 골 도달이 스테이지
- *   전체 클리어다. 1R은 안전 구역 가이드라인(부채꼴)을 보여주고, 2R부터는
- *   가이드라인을 숨긴다(그림자 색상 피드백은 유지) — PRD §7-1.
+ * - 그림자 각도가 안전 구역을 벗어나면 즉시 마지막 세이브 포인트로 리셋
+ * - 하나의 스테이지(같은 통로)를 세이브 포인트로 구간을 나눠 1R→2R→3R 순서로
+ *   이어서 진행한다. 세이브 포인트 통과 시 캐릭터 위치는 그대로 두고 다음
+ *   라운드로 즉시 전환하며(텔레포트 없음), 그 지점이 새 리스폰 기준이 된다.
+ *   마지막 라운드에서 최종 골 도달 시 스테이지 전체 클리어. 1R은 안전 구역
+ *   가이드라인(부채꼴)을 보여주고, 2R부터는 가이드라인을 숨긴다(그림자 색상
+ *   피드백은 유지). 3R 디메리트: 허용 각도 축소 + WASD 이동키 상하좌우
+ *   반전(그림자 회전키는 영향 없음) — PRD §7-1.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
   { onDeathCountChange, onRoundChange },
@@ -56,6 +71,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const deathCountRef = useRef(0);
   const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
+  // 마지막으로 통과한 세이브 포인트 — 사망 시 이 지점으로 리스폰한다(스폰 지점 아님).
+  const savePointRef = useRef<Point>({ ...stage.spawn });
 
   useImperativeHandle(
     ref,
@@ -63,10 +80,13 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       restart: () => {
         characterRef.current = { ...stage.spawn };
         shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+        savePointRef.current = { ...stage.spawn };
+        roundRef.current = 1;
+        onRoundChange?.(1);
         clearedRef.current = false;
       },
     }),
-    [stage],
+    [stage, onRoundChange],
   );
 
   useEffect(() => {
@@ -84,7 +104,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       lastTime = time;
 
       if (!clearedRef.current) {
-        characterRef.current = moveCharacter(characterRef.current, inputRef.current, deltaSeconds, canOccupy);
+        const moveInput = controlsReversed(roundRef.current)
+          ? reverseControls(inputRef.current)
+          : inputRef.current;
+        characterRef.current = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
 
         if (inputRef.current.rotateCW) {
           shadowAngleRef.current += ROTATION_SPEED * deltaSeconds;
@@ -93,30 +116,28 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           shadowAngleRef.current -= ROTATION_SPEED * deltaSeconds;
         }
 
+        const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
         const natural = naturalAngle(stage.lightPos, characterRef.current);
-        const aligned = isShadowAligned(shadowAngleRef.current, natural, SAFE_ANGLE_TOLERANCE);
+        const aligned = isShadowAligned(shadowAngleRef.current, natural, tolerance);
 
         if (!aligned) {
-          characterRef.current = { ...stage.spawn };
-          shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+          characterRef.current = { ...savePointRef.current };
+          shadowAngleRef.current = naturalAngle(stage.lightPos, savePointRef.current);
           deathCountRef.current += 1;
           onDeathCountChange?.(deathCountRef.current);
         }
 
-        const distanceToGoal = Math.hypot(
-          characterRef.current.x - stage.goal.x,
-          characterRef.current.y - stage.goal.y,
-        );
-        if (distanceToGoal <= GOAL_RADIUS) {
+        const target = roundTarget(roundRef.current, stage.checkpoints, stage.goal);
+        const distanceToTarget = Math.hypot(characterRef.current.x - target.x, characterRef.current.y - target.y);
+        if (distanceToTarget <= TARGET_RADIUS) {
           const { round, stageCleared } = advanceRound(roundRef.current);
-          roundRef.current = round;
-          onRoundChange?.(round);
           if (stageCleared) {
             clearedRef.current = true;
           } else {
-            characterRef.current = { ...stage.spawn };
-            shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+            savePointRef.current = { ...target };
           }
+          roundRef.current = round;
+          onRoundChange?.(round);
         }
       }
 
@@ -147,20 +168,15 @@ function renderFrame(
 
   drawStage(ctx, stage);
 
+  const tolerance = effectiveAngleTolerance(round, SAFE_ANGLE_TOLERANCE);
   const natural = naturalAngle(stage.lightPos, characterPos);
-  const aligned = isShadowAligned(shadowAngle, natural, SAFE_ANGLE_TOLERANCE);
+  const aligned = isShadowAligned(shadowAngle, natural, tolerance);
 
   // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
   if (isGuideVisible(round)) {
     ctx.beginPath();
     ctx.moveTo(characterPos.x, characterPos.y);
-    ctx.arc(
-      characterPos.x,
-      characterPos.y,
-      SAFE_ZONE_RADIUS,
-      natural - SAFE_ANGLE_TOLERANCE,
-      natural + SAFE_ANGLE_TOLERANCE,
-    );
+    ctx.arc(characterPos.x, characterPos.y, SAFE_ZONE_RADIUS, natural - tolerance, natural + tolerance);
     ctx.closePath();
     ctx.fillStyle = "rgba(74, 144, 217, 0.25)";
     ctx.fill();

@@ -17,6 +17,13 @@ export function drawStage(ctx: CanvasRenderingContext2D, stage: Stage): void {
     }
   }
 
+  ctx.fillStyle = "#4a90d9";
+  for (const checkpoint of stage.checkpoints) {
+    ctx.beginPath();
+    ctx.arc(checkpoint.x, checkpoint.y, 10, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.fillStyle = "#f5a623";
   ctx.beginPath();
   ctx.arc(stage.goal.x, stage.goal.y, 12, 0, Math.PI * 2);
