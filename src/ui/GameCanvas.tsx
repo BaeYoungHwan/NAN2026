@@ -21,15 +21,17 @@ const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 const GOAL_RADIUS = 40; // 골 도달 판정 반경(px)
 
 export interface GameCanvasHandle {
-  /** 캐릭터·그림자 각도를 스폰 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
+  /** 캐릭터·그림자 각도·라운드를 스폰/1R 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
   restart: () => void;
 }
 
 interface GameCanvasProps {
   /** 사망(정렬 이탈) 이벤트가 발생할 때만 호출된다 — 매 프레임 호출되지 않음. */
   onDeathCountChange?: (count: number) => void;
-  /** 라운드가 바뀔 때만 호출된다(1R→2R→3R) — 매 프레임 호출되지 않음. */
-  onRoundChange?: (round: Round) => void;
+  /** 라운드가 바뀔 때만 호출된다(골 도달로 1R→2R→3R 진행 시) — 매 프레임 호출되지 않음. stageCleared는 3R 골 도달(스테이지 전체 클리어) 여부. */
+  onRoundChange?: (round: Round, stageCleared: boolean) => void;
+  /** true인 동안 캐릭터 이동·그림자 회전·판정을 멈춘다 (저승사자 대사 표시 중 등). */
+  inputDisabled?: boolean;
 }
 
 /**
@@ -44,7 +46,7 @@ interface GameCanvasProps {
  *   가이드라인을 숨긴다(그림자 색상 피드백은 유지) — PRD §7-1.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
-  { onDeathCountChange, onRoundChange },
+  { onDeathCountChange, onRoundChange, inputDisabled = false },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -63,6 +65,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       restart: () => {
         characterRef.current = { ...stage.spawn };
         shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+        roundRef.current = 1;
         clearedRef.current = false;
       },
     }),
@@ -83,7 +86,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const deltaSeconds = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
 
-      if (!clearedRef.current) {
+      if (!clearedRef.current && !inputDisabled) {
         characterRef.current = moveCharacter(characterRef.current, inputRef.current, deltaSeconds, canOccupy);
 
         if (inputRef.current.rotateCW) {
@@ -110,7 +113,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         if (distanceToGoal <= GOAL_RADIUS) {
           const { round, stageCleared } = advanceRound(roundRef.current);
           roundRef.current = round;
-          onRoundChange?.(round);
+          onRoundChange?.(round, stageCleared);
           if (stageCleared) {
             clearedRef.current = true;
           } else {
@@ -127,7 +130,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, stage, canOccupy, onDeathCountChange, onRoundChange]);
+  }, [inputRef, stage, canOccupy, onDeathCountChange, onRoundChange, inputDisabled]);
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
 });
