@@ -28,8 +28,10 @@ export interface GameCanvasHandle {
 interface GameCanvasProps {
   /** 사망(정렬 이탈) 이벤트가 발생할 때만 호출된다 — 매 프레임 호출되지 않음. */
   onDeathCountChange?: (count: number) => void;
-  /** 라운드가 바뀔 때만 호출된다(골 도달로 1R→2R→3R 진행 시) — 매 프레임 호출되지 않음. */
-  onRoundChange?: (round: Round) => void;
+  /** 라운드가 바뀔 때만 호출된다(골 도달로 1R→2R→3R 진행 시) — 매 프레임 호출되지 않음. stageCleared는 3R 골 도달(스테이지 전체 클리어) 여부. */
+  onRoundChange?: (round: Round, stageCleared: boolean) => void;
+  /** true인 동안 캐릭터 이동·그림자 회전·판정을 멈춘다 (저승사자 대사 표시 중 등). */
+  inputDisabled?: boolean;
 }
 
 /**
@@ -44,7 +46,7 @@ interface GameCanvasProps {
  *   가이드라인을 숨긴다(그림자 색상 피드백은 유지) — PRD §7-1.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
-  { onDeathCountChange, onRoundChange },
+  { onDeathCountChange, onRoundChange, inputDisabled = false },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -65,7 +67,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
         roundRef.current = 1;
         clearedRef.current = false;
-        onRoundChange?.(1);
+        onRoundChange?.(1, false);
       },
     }),
     [stage, onRoundChange],
@@ -85,7 +87,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const deltaSeconds = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
 
-      if (!clearedRef.current) {
+      if (!clearedRef.current && !inputDisabled) {
         characterRef.current = moveCharacter(characterRef.current, inputRef.current, deltaSeconds, canOccupy);
 
         if (inputRef.current.rotateCW) {
@@ -112,7 +114,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         if (distanceToGoal <= GOAL_RADIUS) {
           const { round, stageCleared } = advanceRound(roundRef.current);
           roundRef.current = round;
-          onRoundChange?.(round);
+          onRoundChange?.(round, stageCleared);
           if (stageCleared) {
             clearedRef.current = true;
           } else {
@@ -129,7 +131,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, stage, canOccupy, onDeathCountChange, onRoundChange]);
+  }, [inputRef, stage, canOccupy, onDeathCountChange, onRoundChange, inputDisabled]);
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
 });
