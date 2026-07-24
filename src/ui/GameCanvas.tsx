@@ -9,7 +9,7 @@ import {
   roundTarget,
   type Round,
 } from "../core/round";
-import { CHARACTER_RADIUS, moveCharacter, type MoveInput } from "../physics/character";
+import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
 import { naturalAngle, shadowTip } from "../shadow/shadowCaster";
 import { isShadowAligned } from "../shadow/containmentJudge";
@@ -26,11 +26,6 @@ import { drawStage } from "./drawStage";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 const TARGET_RADIUS = 40; // 세이브 포인트·골 도달 판정 반경(px)
-
-/** 3R 디메리트 — WASD 이동키의 상하좌우를 반전시킨다(그림자 회전키는 대상 아님). */
-function reverseControls(input: MoveInput): MoveInput {
-  return { up: input.down, down: input.up, left: input.right, right: input.left };
-}
 
 export interface GameCanvasHandle {
   /** 캐릭터·그림자 각도를 스폰 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
@@ -105,7 +100,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
       if (!clearedRef.current) {
         const moveInput = controlsReversed(roundRef.current)
-          ? reverseControls(inputRef.current)
+          ? reverseMoveInput(inputRef.current)
           : inputRef.current;
         characterRef.current = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
 

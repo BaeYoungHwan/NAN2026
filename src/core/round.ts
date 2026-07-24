@@ -32,6 +32,11 @@ export function roundTarget(round: Round, checkpoints: Point[], goal: Point): Po
   return round < MAX_ROUND ? checkpoints[round - 1] : goal;
 }
 
+/** 3R 디메리트(허용 각도 축소·조작키 반전)가 적용되는 라운드인지 여부 — PRD §7-1. */
+export function isDemeritRound(round: Round): boolean {
+  return round === 3;
+}
+
 /** 3R 디메리트 — 허용 각도 축소 배율. 임시값, P1 플레이테스트로 확정한다 (PRD §12). */
 export const ROUND_3_TOLERANCE_MULTIPLIER = 0.5;
 
@@ -40,7 +45,7 @@ export const ROUND_3_TOLERANCE_MULTIPLIER = 0.5;
  * 정렬을 더 엄격하게 요구한다 — PRD §7-1 3R 디메리트.
  */
 export function effectiveAngleTolerance(round: Round, baseTolerance: number): number {
-  return round === 3 ? baseTolerance * ROUND_3_TOLERANCE_MULTIPLIER : baseTolerance;
+  return isDemeritRound(round) ? baseTolerance * ROUND_3_TOLERANCE_MULTIPLIER : baseTolerance;
 }
 
 /**
@@ -48,5 +53,5 @@ export function effectiveAngleTolerance(round: Round, baseTolerance: number): nu
  * 영향받지 않음)에만 적용된다 — PRD §7-1.
  */
 export function controlsReversed(round: Round): boolean {
-  return round === 3;
+  return isDemeritRound(round);
 }

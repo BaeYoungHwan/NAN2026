@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHARACTER_SPEED, moveCharacter } from "./character";
+import { CHARACTER_SPEED, moveCharacter, reverseMoveInput } from "./character";
 
 const noInput = { up: false, down: false, left: false, right: false };
 const alwaysOpen = () => true;
@@ -38,5 +38,40 @@ describe("moveCharacter", () => {
     const next = moveCharacter({ x: 100, y: 100 }, { up: false, down: true, left: false, right: true }, 1, canOccupy);
     expect(next.x).toBe(100);
     expect(next.y).toBeGreaterThan(100);
+  });
+});
+
+describe("reverseMoveInput", () => {
+  it("상하좌우를 반전시킨다", () => {
+    expect(reverseMoveInput({ up: true, down: false, left: false, right: false })).toEqual({
+      up: false,
+      down: true,
+      left: false,
+      right: false,
+    });
+    expect(reverseMoveInput({ up: false, down: false, left: true, right: false })).toEqual({
+      up: false,
+      down: false,
+      left: false,
+      right: true,
+    });
+  });
+
+  it("대각선 입력도 각 축이 반전된다", () => {
+    expect(reverseMoveInput({ up: true, down: false, left: true, right: false })).toEqual({
+      up: false,
+      down: true,
+      left: false,
+      right: true,
+    });
+  });
+
+  it("입력이 없으면 반전해도 그대로다", () => {
+    expect(reverseMoveInput({ up: false, down: false, left: false, right: false })).toEqual({
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+    });
   });
 });

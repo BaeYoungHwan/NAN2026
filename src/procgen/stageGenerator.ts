@@ -170,10 +170,16 @@ export function generateStage(seed: number): Stage {
 function computeCheckpoints(tileSize: number, path: Cell[]): Point[] {
   const checkpointCount = MAX_ROUND - 1;
   const checkpoints: Point[] = [];
+  const maxIdx = path.length - 2;
+  let lastIdx = 0; // 스폰 인덱스(0)보다 커야 함
 
   for (let i = 1; i <= checkpointCount; i++) {
     const fraction = i / MAX_ROUND;
-    const idx = Math.min(path.length - 2, Math.max(1, Math.round((path.length - 1) * fraction)));
+    const raw = Math.min(maxIdx, Math.max(1, Math.round((path.length - 1) * fraction)));
+    // 경로가 짧아 raw가 이전 체크포인트와 같거나 앞서면 다음 유효 인덱스로 밀어내
+    // 체크포인트끼리, 그리고 스폰과 겹치지 않게 한다.
+    const idx = Math.min(Math.max(raw, lastIdx + 1), maxIdx);
+    lastIdx = idx;
     const cell = path[idx];
     checkpoints.push(cellCenter(tileSize, cell.col, cell.row));
   }

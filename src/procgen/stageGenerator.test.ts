@@ -57,6 +57,13 @@ describe("generateStage", () => {
     }
   });
 
+  it("체크포인트는 서로, 그리고 스폰·골과도 겹치지 않는다", () => {
+    const stage = generateStage(DEFAULT_SEED);
+    const points = [stage.spawn, ...stage.checkpoints, stage.goal];
+    const unique = new Set(points.map((p) => `${p.x},${p.y}`));
+    expect(unique.size).toBe(points.length);
+  });
+
   it("스폰에서 골까지 walkable 경로로 도달 가능하다", () => {
     const stage = generateStage(DEFAULT_SEED);
     expect(isReachable(stage)).toBe(true);
