@@ -231,15 +231,23 @@ function findAdjacentWallCell(grid: TileGrid, cell: Cell): Cell | null {
  * 배치한다(ADR-004) — 벽 위이므로 캐릭터가 닿을 수 없고, walkable 지점(스폰·
  * 골·체크포인트)과 좌표가 겹칠 일도 구조적으로 없다. 경로 끝(골 근처)이
  * 마지막 간격에 걸리지 않으면 골 쪽에도 하나 추가해 고르게 분포시킨다.
+ *
+ * 서로 다른 경로 샘플 지점이 같은 벽 셀을 찾아낼 수 있으므로(간격이 좁거나
+ * `extraWalls`로 주변 벽이 추가된 경우 특히) 좌표 기준으로 중복을 제거한다 —
+ * PR #7 리뷰에서 확인됨: 재시작(이동 패턴 학습 AI)이 누적될수록 같은 벽 셀이
+ * 반복 선택되어 광원이 겹쳐 그려지는 현상이 실측으로 재현됐다.
  */
 function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
   const sources: Point[] = [];
+  const seenKeys = new Set<string>();
 
   const addNearWall = (cell: Cell) => {
     const wallCell = findAdjacentWallCell(grid, cell);
-    if (wallCell) {
-      sources.push(cellCenter(grid.tileSize, wallCell.col, wallCell.row));
-    }
+    if (!wallCell) return;
+    const key = `${wallCell.col},${wallCell.row}`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    sources.push(cellCenter(grid.tileSize, wallCell.col, wallCell.row));
   };
 
   for (let i = 0; i < path.length; i += LIGHT_SPACING_STEPS) {
@@ -251,12 +259,17 @@ function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
     addNearWall(path[lastIdx]);
   }
 
-  // 경로 전체가 벽에 인접한 셀을 하나도 못 찾는 극단적 경우를 대비해(이론상
-  // 거의 발생하지 않음 — 통로 폭 2칸은 20x15 그리드에서 항상 벽에 둘러싸임)
-  // 최소 1개는 보장한다.
+  // 경로 샘플 지점(간격 단위) 근처에서 전부 벽을 못 찾는 극단적 경우를 대비해
+  // 경로 전체를 순회하며 벽 셀을 찾을 때까지 재시도한다 — walkable 셀을 광원
+  // 좌표로 대체하는 예외는 두지 않는다. "광원은 항상 벽 위에 있다"는
+  // 불변조건(stageGenerator.test.ts로 고정됨)을 이 폴백도 반드시 지켜야 한다.
+  // 통로 폭 2칸은 20x15 그리드에서 항상 벽에 둘러싸이므로(시드 1~2000 검증됨)
+  // 이 루프가 실패하는 경우는 실질적으로 없다.
   if (sources.length === 0) {
-    const midCell = path[Math.floor(path.length / 2)];
-    sources.push(cellCenter(grid.tileSize, midCell.col, midCell.row));
+    for (const cell of path) {
+      addNearWall(cell);
+      if (sources.length > 0) break;
+    }
   }
 
   return sources;
