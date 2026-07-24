@@ -87,6 +87,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const visitCountsRef = useRef(new Map<string, number>());
   // 방문 카운트를 "셀에 들어간 순간"에만 올리기 위한 직전 셀 키(가만히 서 있는 시간은 세지 않음).
   const lastVisitedCellKeyRef = useRef<string | null>(null);
+  // stage 참조가 바뀔 때만(=재시작 시) 충돌판정 함수를 새로 만든다 — 매 프레임 재생성 방지.
+  const colliderCacheRef = useRef<{ stage: Stage; canOccupy: (point: Point) => boolean } | null>(null);
 
   useImperativeHandle(
     ref,
@@ -124,7 +126,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const stage = stageRef.current;
 
       if (!clearedRef.current && !inputDisabled) {
-        const canOccupy = createGridCollider(stage.grid, CHARACTER_RADIUS);
+        if (colliderCacheRef.current?.stage !== stage) {
+          colliderCacheRef.current = { stage, canOccupy: createGridCollider(stage.grid, CHARACTER_RADIUS) };
+        }
+        const canOccupy = colliderCacheRef.current.canOccupy;
         const moveInput = controlsReversed(roundRef.current)
           ? reverseMoveInput(inputRef.current)
           : inputRef.current;

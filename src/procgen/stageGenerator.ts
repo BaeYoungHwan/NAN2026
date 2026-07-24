@@ -136,6 +136,11 @@ function createEmptyGrid(): TileGrid {
  * `extraWalls`(선택)는 통로를 다 판 뒤에 추가로 벽 처리할 셀 좌표(픽셀)다 —
  * 이동 패턴 학습 AI(`src/ai/pathBlocker.ts`)가 고른 차단 후보를 넘길 때 쓴다.
  * carve 자체에는 영향을 주지 않으므로 spawn/checkpoints/goal은 그대로 유지된다.
+ *
+ * 신뢰 경계: 이 함수는 `extraWalls`가 스폰/체크포인트/골과 겹치지 않는지, 막았을 때
+ * 스테이지가 여전히 풀리는지 스스로 검증하지 않는다 — 호출자(`selectBlockedCells`)가
+ * 이미 도달가능성을 검증한 셀만 넘긴다는 전제에 의존한다. 새 호출자를 추가할 땐
+ * 반드시 같은 방식으로 사전 검증할 것.
  */
 export function generateStage(seed: number, extraWalls?: Point[]): Stage {
   const start: Cell = { col: 1, row: GRID_ROWS - 3 };

@@ -36,8 +36,19 @@ describe("isReachable", () => {
     expect(isReachable(grid, cellCenter(0, 0), cellCenter(2, 0))).toBe(true);
   });
 
-  it("시작점과 도착점이 같으면 항상 도달 가능하다", () => {
+  it("시작점과 도착점이 같으면(그 셀이 walkable이면) 도달 가능하다", () => {
     const grid = makeGrid([[0]]);
     expect(isReachable(grid, cellCenter(0, 0), cellCenter(0, 0))).toBe(true);
+  });
+
+  it("시작점(=도착점)이 벽이면 도달 불가능하다", () => {
+    const grid = makeGrid([[1]]);
+    expect(isReachable(grid, cellCenter(0, 0), cellCenter(0, 0))).toBe(false);
+  });
+
+  it("시작점이나 도착점 자체가 벽이면 도달 불가능하다", () => {
+    const grid = makeGrid([[0, 1, 0]]);
+    expect(isReachable(grid, cellCenter(1, 0), cellCenter(2, 0))).toBe(false);
+    expect(isReachable(grid, cellCenter(0, 0), cellCenter(1, 0))).toBe(false);
   });
 });
