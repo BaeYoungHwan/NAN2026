@@ -166,8 +166,14 @@ export function generateStage(seed: number): Stage {
  * 세이브 포인트를 뽑는다 — 라운드가 3개면 경로를 3구간으로 나누는 2개의
  * 전환점(1R→2R, 2R→3R)이 나온다. 스폰·골과 겹치지 않도록 인덱스를
  * [1, path.length - 2] 범위로 고정한다.
+ *
+ * 보장 범위: `path.length >= (MAX_ROUND - 1) + 2`(현재 4칸 이상)일 때만 모든
+ * 체크포인트가 서로/스폰/골과 겹치지 않음을 보장한다. 그보다 짧은 경로는
+ * 스폰·골 사이 정수 인덱스 칸이 부족해(예: 3칸이면 내부 칸이 1개뿐) 원리적으로
+ * 겹침을 막을 수 없다 — `generateStage`의 `MIN_SPAN_CELLS` 재시도 게이트가 이런
+ * 짧은 경로를 걸러내는 1차 방어선이므로, 여기서는 더 정교하게 처리하지 않는다.
  */
-function computeCheckpoints(tileSize: number, path: Cell[]): Point[] {
+export function computeCheckpoints(tileSize: number, path: Cell[]): Point[] {
   const checkpointCount = MAX_ROUND - 1;
   const checkpoints: Point[] = [];
   const maxIdx = path.length - 2;

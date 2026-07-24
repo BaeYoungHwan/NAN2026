@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SEED, generateStage } from "./stageGenerator";
+import { DEFAULT_SEED, computeCheckpoints, generateStage } from "./stageGenerator";
 
 function isWalkable(stage: ReturnType<typeof generateStage>, point: { x: number; y: number }): boolean {
   const col = Math.floor(point.x / stage.grid.tileSize);
@@ -89,5 +89,22 @@ describe("generateStage", () => {
     const stage = generateStage(DEFAULT_SEED);
     expect(stage.lightPos.x).toBeGreaterThanOrEqual(0);
     expect(stage.lightPos.x).toBeLessThanOrEqual(800);
+  });
+});
+
+describe("computeCheckpoints", () => {
+  const tileSize = 40;
+  const cell = (col: number) => ({ col, row: 0 });
+
+  it("경로가 충분히 길면(4칸 이상) 체크포인트가 서로 겹치지 않는다", () => {
+    const path = [0, 1, 2, 3].map(cell);
+    const points = computeCheckpoints(tileSize, path);
+    expect(points[0]).not.toEqual(points[1]);
+  });
+
+  it("알려진 한계: 경로가 3칸 이하면 체크포인트가 겹칠 수 있다 (MIN_SPAN_CELLS 게이트로 실사용 차단)", () => {
+    const path = [0, 1, 2].map(cell);
+    const points = computeCheckpoints(tileSize, path);
+    expect(points[0]).toEqual(points[1]); // 현재 알려진 동작 — 개선 아님, 회귀 감지용
   });
 });
