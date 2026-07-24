@@ -21,14 +21,14 @@ const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 const GOAL_RADIUS = 40; // 골 도달 판정 반경(px)
 
 export interface GameCanvasHandle {
-  /** 캐릭터·그림자 각도를 스폰 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
+  /** 캐릭터·그림자 각도·라운드를 스폰/1R 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
   restart: () => void;
 }
 
 interface GameCanvasProps {
   /** 사망(정렬 이탈) 이벤트가 발생할 때만 호출된다 — 매 프레임 호출되지 않음. */
   onDeathCountChange?: (count: number) => void;
-  /** 라운드가 바뀔 때만 호출된다(1R→2R→3R) — 매 프레임 호출되지 않음. */
+  /** 라운드가 바뀔 때만 호출된다(골 도달로 1R→2R→3R 진행 시) — 매 프레임 호출되지 않음. */
   onRoundChange?: (round: Round) => void;
 }
 
@@ -63,10 +63,12 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       restart: () => {
         characterRef.current = { ...stage.spawn };
         shadowAngleRef.current = naturalAngle(stage.lightPos, stage.spawn);
+        roundRef.current = 1;
         clearedRef.current = false;
+        onRoundChange?.(1);
       },
     }),
-    [stage],
+    [stage, onRoundChange],
   );
 
   useEffect(() => {
