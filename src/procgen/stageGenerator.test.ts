@@ -41,7 +41,7 @@ describe("generateStage", () => {
     expect(a.spawn).toEqual(b.spawn);
     expect(a.goal).toEqual(b.goal);
     expect(a.checkpoints).toEqual(b.checkpoints);
-    expect(a.lightPos).toEqual(b.lightPos);
+    expect(a.lightSources).toEqual(b.lightSources);
     expect(Array.from(a.grid.cells)).toEqual(Array.from(b.grid.cells));
   });
 
@@ -51,10 +51,29 @@ describe("generateStage", () => {
     expect(Array.from(a.grid.cells)).not.toEqual(Array.from(b.grid.cells));
   });
 
-  it("광원 위치는 캔버스 폭 안에 있다", () => {
+  it("어떤 광원도 스폰·골 지점과 겹치지 않는다 (광원이 벽 셀에 배치되므로 walkable 지점과는 구조적으로 겹칠 수 없다)", () => {
     const stage = generateStage(DEFAULT_SEED);
-    expect(stage.lightPos.x).toBeGreaterThanOrEqual(0);
-    expect(stage.lightPos.x).toBeLessThanOrEqual(800);
+    for (const light of stage.lightSources) {
+      expect(`${light.x},${light.y}`).not.toBe(`${stage.spawn.x},${stage.spawn.y}`);
+      expect(`${light.x},${light.y}`).not.toBe(`${stage.goal.x},${stage.goal.y}`);
+    }
+  });
+
+  it("광원(가로등)이 최소 하나 이상 배치되고 모두 캔버스 폭 안에 있다", () => {
+    const stage = generateStage(DEFAULT_SEED);
+    expect(stage.lightSources.length).toBeGreaterThan(0);
+    for (const light of stage.lightSources) {
+      expect(light.x).toBeGreaterThanOrEqual(0);
+      expect(light.x).toBeLessThanOrEqual(800);
+    }
+  });
+
+  it("광원(가로등)은 벽 셀 위에 배치되어 캐릭터가 물리적으로 닿을 수 없다", () => {
+    const stage = generateStage(DEFAULT_SEED);
+    expect(stage.lightSources.length).toBeGreaterThan(0);
+    for (const light of stage.lightSources) {
+      expect(isWalkable(stage, light)).toBe(false);
+    }
   });
 });
 
