@@ -37,4 +37,38 @@ describe("이동 패턴 학습 AI — 재시작 반복 통합 시나리오", () 
     // 사실상 동작 안 하는 것과 같다.
     expect(stage.aiBlockedCells.length).toBeGreaterThan(0);
   });
+
+  /**
+   * PR #7 리뷰에서 발견됨: 재시작마다 placeLightSources가 그 시점의 grid를
+   * 기준으로 인접 벽 셀을 다시 탐색하는데, AI가 벽을 누적할수록 서로 다른
+   * 경로 샘플 지점이 같은 벽 셀을 찾아내 광원 좌표가 중복될 수 있었다
+   * (15회 재시작 재현 시 실제로 (100,500) 좌표가 2개 광원으로 중복됨).
+   * placeLightSources의 dedup으로 고쳤으므로 회귀를 여기서 고정한다.
+   */
+  it("여러 번 재시작해도 광원 좌표가 중복되지 않고, 항상 벽 셀 위에 있다", () => {
+    let stage = generateStage(DEFAULT_SEED);
+
+    for (let restartCount = 0; restartCount < 15; restartCount++) {
+      const visits: VisitCounts = new Map();
+      for (let row = 0; row < stage.grid.rows; row++) {
+        for (let col = 0; col < stage.grid.cols; col++) {
+          if (stage.grid.cells[row * stage.grid.cols + col] === 0) {
+            const point = { x: (col + 0.5) * stage.grid.tileSize, y: (row + 0.5) * stage.grid.tileSize };
+            visits.set(cellKey(stage.grid, point), 100);
+          }
+        }
+      }
+
+      stage = applyLearning(DEFAULT_SEED, stage, visits, MAX_AI_BLOCKS);
+
+      const coords = stage.lightSources.map((p) => `${p.x},${p.y}`);
+      expect(new Set(coords).size).toBe(coords.length);
+
+      for (const light of stage.lightSources) {
+        const col = Math.floor(light.x / stage.grid.tileSize);
+        const row = Math.floor(light.y / stage.grid.tileSize);
+        expect(stage.grid.cells[row * stage.grid.cols + col]).toBe(1);
+      }
+    }
+  });
 });

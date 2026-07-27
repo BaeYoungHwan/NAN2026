@@ -19,9 +19,11 @@ export interface TileGrid {
  * ADR-002: 안전 구역은 레벨 고정 폴리곤이 아니라 캐릭터에 부착되어 광원-캐릭터
  * 상대 위치로 매 프레임 재계산되므로, grid는 오직 캐릭터의 물리적 이동에만 관여하고
  * 그림자 각도 판정(shadow/)과는 완전히 무관하다.
+ * ADR-004: 광원은 통로 경로를 따라 여러 개(가로등) 배치되며, 매 프레임 캐릭터와
+ * 가장 가까운 광원이 안전 구역 판정에 쓰인다(`shadow/shadowCaster.ts`의 `naturalAngle`).
  */
 export interface Stage {
-  lightPos: Point;
+  lightSources: Point[];
   grid: TileGrid;
   spawn: Point;
   /**

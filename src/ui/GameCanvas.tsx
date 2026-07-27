@@ -11,12 +11,13 @@ import {
 } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
-import { naturalAngle } from "../shadow/shadowCaster";
+import { naturalAngle, nearestLight } from "../shadow/shadowCaster";
 import { alignmentMargin } from "../shadow/containmentJudge";
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   DEFAULT_SEED,
+  LIGHT_SWITCH_GRACE_SECONDS,
   ROTATION_SPEED,
   SAFE_ANGLE_TOLERANCE,
   SHADOW_LENGTH,
@@ -186,12 +187,16 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const [initialStage] = useState<Stage>(() => generateStage(DEFAULT_SEED));
   const stageRef = useRef<Stage>(initialStage);
   const characterRef = useRef<Point>({ ...stageRef.current.spawn });
-  const shadowAngleRef = useRef(naturalAngle(stageRef.current.lightPos, stageRef.current.spawn));
+  const shadowAngleRef = useRef(naturalAngle(stageRef.current.lightSources, stageRef.current.spawn));
   const deathCountRef = useRef(0);
   const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
   // 마지막으로 통과한 세이브 포인트 — 사망 시 이 지점으로 리스폰한다(스폰 지점 아님).
   const savePointRef = useRef<Point>({ ...stageRef.current.spawn });
+  // 직전 프레임의 최근접(활성) 광원 — 바뀌는 순간을 감지해 판정 유예를 주기 위함 (ADR-004).
+  const activeLightRef = useRef<Point>(nearestLight(stageRef.current.lightSources, stageRef.current.spawn));
+  // 광원 전환 유예 남은 시간(초) — 0보다 크면 이번 프레임 정렬 판정을 건너뛴다.
+  const lightSwitchGraceRef = useRef(0);
   // 이동 패턴 학습 AI — 캐릭터가 지나간 셀 방문 횟수. 세션 내내 누적(재시작해도 초기화 안 함).
   const visitCountsRef = useRef(new Map<string, number>());
   // 방문 카운트를 "셀에 들어간 순간"에만 올리기 위한 직전 셀 키(가만히 서 있는 시간은 세지 않음).
@@ -226,8 +231,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
         stageRef.current = nextStage;
         characterRef.current = { ...nextStage.spawn };
-        shadowAngleRef.current = naturalAngle(nextStage.lightPos, nextStage.spawn);
+        shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
         savePointRef.current = { ...nextStage.spawn };
+        activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
+        lightSwitchGraceRef.current = 0;
         roundRef.current = 1;
         lastVisitedCellKeyRef.current = null;
         dyingRef.current = false;
@@ -257,7 +264,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       if (dyingRef.current) {
         if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
           characterRef.current = { ...savePointRef.current };
-          shadowAngleRef.current = naturalAngle(stage.lightPos, savePointRef.current);
+          shadowAngleRef.current = naturalAngle(stage.lightSources, savePointRef.current);
+          // 리스폰으로 위치가 세이브 포인트로 튀는 것 자체가 "광원이 바뀐 것"처럼
+          // 감지되어 유예가 걸리는 걸 막기 위해, 활성 광원 기준점도 같이 갱신한다.
+          activeLightRef.current = nearestLight(stage.lightSources, savePointRef.current);
           // 죽기 직전 이동 방향이 남아있으면, 리스폰 직후 실제 이동 방향과 무관하게
           // 죽던 순간 보고 있던 방향을 그대로 유지해 버려서 캐릭터가 엉뚱한 쪽을
           // 보며 달리는 것처럼 보인다 — 리스폰 시 기본 방향(오른쪽)으로 되돌린다.
@@ -287,20 +297,26 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           shadowAngleRef.current -= ROTATION_SPEED * deltaSeconds;
         }
 
-        const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
-        const natural = naturalAngle(stage.lightPos, characterRef.current);
-        const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
-
-        if (margin > 1) {
-          dyingRef.current = true;
-          deathAnimStartRef.current = time;
-          deathCountRef.current += 1;
-          onDeathCountChange?.(deathCountRef.current);
+        // 최근접(활성) 광원이 바뀌는 순간을 감지해 판정 유예를 건다 — 광원 전환
+        // 시 요구 각도가 최대 180도 가까이 순간적으로 바뀔 수 있는데, 회전
+        // 속도로는 한 프레임 안에 따라잡을 수 없어 그대로 두면 무조건 죽는다
+        // (ADR-004). 유예 동안은 정렬이 깨져도 죽지 않는다.
+        const currentActiveLight = nearestLight(stage.lightSources, characterRef.current);
+        if (currentActiveLight.x !== activeLightRef.current.x || currentActiveLight.y !== activeLightRef.current.y) {
+          lightSwitchGraceRef.current = LIGHT_SWITCH_GRACE_SECONDS;
+          activeLightRef.current = currentActiveLight;
         }
 
+        // 체크포인트/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 광원 전환
+        // 경계선이 체크포인트 포착 반경과 우연히 겹치면(ADR-004), 도달하는 바로
+        // 그 프레임에 정렬이 깨질 수 있는데, 그 경우에도 "닿았다"는 사실은
+        // 항상 인정되어야 한다(도달 프레임엔 정렬 판정을 건너뜀). 그 외
+        // 구간에서는 기존과 동일하게 매 프레임 정렬을 검사한다.
         const target = roundTarget(roundRef.current, stage.checkpoints, stage.goal);
         const distanceToTarget = Math.hypot(characterRef.current.x - target.x, characterRef.current.y - target.y);
-        if (distanceToTarget <= TARGET_RADIUS) {
+        const reachedTarget = distanceToTarget <= TARGET_RADIUS;
+
+        if (reachedTarget) {
           const { round, stageCleared } = advanceRound(roundRef.current);
           if (stageCleared) {
             clearedRef.current = true;
@@ -309,12 +325,27 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           }
           roundRef.current = round;
           onRoundChange?.(round, stageCleared);
+        } else {
+          const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
+          const natural = naturalAngle(stage.lightSources, characterRef.current);
+          const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
+
+          if (margin > 1 && lightSwitchGraceRef.current <= 0) {
+            dyingRef.current = true;
+            deathAnimStartRef.current = time;
+            deathCountRef.current += 1;
+            onDeathCountChange?.(deathCountRef.current);
+          }
+        }
+
+        if (lightSwitchGraceRef.current > 0) {
+          lightSwitchGraceRef.current = Math.max(0, lightSwitchGraceRef.current - deltaSeconds);
         }
       }
 
       // 렌더용 위험도/포즈 — 사망 리셋 등으로 위치가 막 바뀌었을 수 있어 매 프레임 다시 계산한다.
       const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
-      const natural = naturalAngle(stage.lightPos, characterRef.current);
+      const natural = naturalAngle(stage.lightSources, characterRef.current);
       const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
       const facingInput = controlsReversed(roundRef.current)
         ? reverseMoveInput(inputRef.current)
@@ -615,11 +646,26 @@ function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: Chara
     ctx.stroke();
   }
 
-  // 광원
-  ctx.fillStyle = "#f5d547";
-  ctx.beginPath();
-  ctx.arc(stage.lightPos.x, stage.lightPos.y, 8, 0, Math.PI * 2);
-  ctx.fill();
+  // 광원(가로등) — 여러 개 중 지금 판정에 쓰이는(최근접) 광원만 밝게 강조해,
+  // 안전 구역이 왜 이동했는지 플레이어가 알아볼 수 있게 한다 (ADR-004). 활성
+  // 광원은 캐릭터 반경(10px)보다 큰 바깥 링도 함께 그려, 캐릭터가 광원 바로
+  // 위에 서 있어도(예: 스폰 지점) 강조 표시가 가려지지 않게 한다.
+  const activeLight = nearestLight(stage.lightSources, characterPos);
+  for (const light of stage.lightSources) {
+    const isActive = light === activeLight;
+    ctx.fillStyle = isActive ? "#f5d547" : "#8a7a3a";
+    ctx.beginPath();
+    ctx.arc(light.x, light.y, isActive ? 8 : 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (isActive) {
+      ctx.strokeStyle = "#f5d547";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(light.x, light.y, 16, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
 
   // 그림자 — 죽음 시퀀스 중에는 그리지 않는다(몸만 죽음 모션으로 표시)
   if (!dying) {
