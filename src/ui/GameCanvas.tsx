@@ -274,6 +274,13 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       lastTime = time;
       const stage = stageRef.current;
 
+      // 죽음 시퀀스·대사창·클리어 중에는 실제 게임플레이가 멈춰있으므로, 이
+      // 시점에 물리적으로 눌려있는 방향키가 그대로 반영돼 캐릭터 방향이 바뀌거나
+      // (죽는 도중 반대키를 누르고 있으면 죽음 스프라이트가 반전됨) 정지 상태인데
+      // 걷기 포즈가 재생되는(대사창 뜬 사이 이동키가 눌려있으면) 문제가 있었다 —
+      // 아래 두 값은 실제 이동 처리가 일어나는 분기 안에서만 갱신한다.
+      let isMoving = false;
+
       if (dyingRef.current) {
         if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
           characterRef.current = { ...savePointRef.current };
@@ -296,6 +303,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           ? reverseMoveInput(inputRef.current)
           : inputRef.current;
         characterRef.current = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
+
+        if (moveInput.right) facingRightRef.current = true;
+        else if (moveInput.left) facingRightRef.current = false;
+        isMoving = moveInput.up || moveInput.down || moveInput.left || moveInput.right;
 
         const visitKey = cellKey(stage.grid, characterRef.current);
         if (visitKey !== lastVisitedCellKeyRef.current) {
@@ -360,12 +371,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
       const natural = naturalAngle(stage.lightSources, characterRef.current);
       const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
-      const facingInput = controlsReversed(roundRef.current)
-        ? reverseMoveInput(inputRef.current)
-        : inputRef.current;
-      if (facingInput.right) facingRightRef.current = true;
-      else if (facingInput.left) facingRightRef.current = false;
-      const isMoving = facingInput.up || facingInput.down || facingInput.left || facingInput.right;
       const deathInfo = dyingRef.current
         ? deathFrameInfo(time - deathAnimStartRef.current, DEATH_ANIM_MS, time)
         : undefined;
