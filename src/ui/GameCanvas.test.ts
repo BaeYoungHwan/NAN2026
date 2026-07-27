@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deathFrameInfo, selectBodyPose } from "./GameCanvas";
+import { deathFrameInfo, selectBodyPose, selectShadowExpression } from "./GameCanvas";
 
 describe("selectBodyPose", () => {
   it("이동 중이면 위험도와 무관하게 항상 walk를 반환한다", () => {
@@ -20,6 +20,33 @@ describe("selectBodyPose", () => {
   it("위험도 0.85 이상이면 danger를 반환한다(경계값·이탈 이후 값 포함)", () => {
     expect(selectBodyPose(0.85, false)).toBe("danger");
     expect(selectBodyPose(1.5, false)).toBe("danger");
+  });
+});
+
+describe("selectShadowExpression", () => {
+  it("위험도가 낮으면 normal을 반환한다", () => {
+    expect(selectShadowExpression(0)).toBe("normal");
+    expect(selectShadowExpression(0.59)).toBe("normal");
+  });
+
+  it("위험도 0.6 이상 0.85 미만이면 surprised를 반환한다(경계값 포함)", () => {
+    expect(selectShadowExpression(0.6)).toBe("surprised");
+    expect(selectShadowExpression(0.84)).toBe("surprised");
+  });
+
+  it("위험도 0.85 이상이면 scared를 반환한다(경계값·이탈 이후 값 포함)", () => {
+    expect(selectShadowExpression(0.85)).toBe("scared");
+    expect(selectShadowExpression(1.5)).toBe("scared");
+  });
+
+  it("selectBodyPose와 동일한 임계값(0.6/0.85)을 공유해 항상 같은 위험 구간에서 함께 전환된다", () => {
+    for (const margin of [0, 0.3, 0.6, 0.7, 0.85, 1, 1.5]) {
+      const bodyPose = selectBodyPose(margin, false);
+      const shadowExpression = selectShadowExpression(margin);
+      if (bodyPose === "idle") expect(shadowExpression).toBe("normal");
+      if (bodyPose === "flinch") expect(shadowExpression).toBe("surprised");
+      if (bodyPose === "danger") expect(shadowExpression).toBe("scared");
+    }
   });
 });
 

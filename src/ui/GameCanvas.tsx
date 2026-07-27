@@ -34,6 +34,7 @@ import {
   WALK_REFERENCE_HEIGHT_PX,
   type BodyPose,
   type CharacterSprites,
+  type ShadowExpression,
 } from "./characterSprites";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
@@ -59,6 +60,17 @@ export function selectBodyPose(margin: number, isMoving: boolean): BodyPose {
   if (margin >= 0.85) return "danger";
   if (margin >= 0.6) return "flinch";
   return "idle";
+}
+
+/**
+ * 위험도(alignmentMargin)에 따라 그림자(바닥 실루엣)의 표정을 고른다 — selectBodyPose와
+ * 동일한 임계값을 써서 몸 포즈·그림자 표정이 항상 같은 위험 구간에서 함께 바뀐다.
+ * annoyed/disappointed/delighted 3종은 이번 구현에서는 트리거가 없어 비워둔다(추후 확장 여지).
+ */
+export function selectShadowExpression(margin: number): ShadowExpression {
+  if (margin >= 0.85) return "scared";
+  if (margin >= 0.6) return "surprised";
+  return "normal";
 }
 
 // 4단계를 균등 배분하지 않고, ①(비틀거리다 쓰러짐)은 넉넉히 줘서 회전 연출이
@@ -358,11 +370,13 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         ? deathFrameInfo(time - deathAnimStartRef.current, DEATH_ANIM_MS, time)
         : undefined;
       const bodyPose: BodyPose = deathInfo ? deathInfo.current : selectBodyPose(margin, isMoving);
+      const shadowExpression = selectShadowExpression(margin);
 
       renderFrame(ctx, stage, sprites, {
         characterPos: characterRef.current,
         shadowAngle: shadowAngleRef.current,
         bodyPose,
+        shadowExpression,
         deathInfo,
         round: roundRef.current,
         cleared: clearedRef.current,
@@ -410,6 +424,8 @@ interface RenderState {
   characterPos: Point;
   shadowAngle: number;
   bodyPose: BodyPose;
+  /** 위험도에 따라 바뀌는 그림자(바닥 실루엣)의 표정 — selectShadowExpression 참고. */
+  shadowExpression: ShadowExpression;
   /** 사망 시퀀스 중일 때만 존재 — 프레임 간 크로스페이드·흔들림 연출에 쓴다. */
   deathInfo?: DeathFrameInfo;
   round: Round;
@@ -571,14 +587,18 @@ function drawRunDustEffect(ctx: CanvasRenderingContext2D, feetX: number, feetY: 
 }
 
 /**
- * 그림자 — 캐릭터 실루엣을 "해질녘 긴 그림자"처럼 전단(shear) 변환으로
- * 늘여서 그린다. 서 있는 캐릭터를 90도로 눕히는(회전) 방식은 정면 그림이
- * 옆으로 자빠진 것처럼 보여 "캐릭터 그림자 같지 않다"는 피드백이 반복됐다 —
- * 실제 해질녘 그림자는 사람이 눕는 게 아니라 서 있는 실루엣 그대로 광원
- * 반대 방향으로 길게 뻗기만 한다. 그래서 캐릭터의 좌우 폭 축은 화면에서
- * 항상 그대로 수평으로 두고(회전하지 않음), 발(원점)부터 머리까지의 높이
- * 축만 shadowAngle 방향으로 투영해 늘인다 — 캐릭터 본체와 완전히 같은
- * 실루엣이 그대로 원근만 달라진 모양이라 "캐릭터에서 생긴 그림자"로 읽힌다.
+ * 그림자 — 위험도(alignmentMargin)에 따라 바뀌는 "그림자 표정" 블롭
+ * (face-*.png, selectShadowExpression 참고)을 "해질녘 긴 그림자"처럼
+ * 전단(shear) 변환으로 늘여서 그린다. 원래는 캐릭터 몸 전체 실루엣(body.idle)을
+ * 늘이는 방식이었지만, 시트에 원래 있던 "그림자 표정" 에셋이 로딩만 되고
+ * 어디에도 쓰이지 않는 문제가 있어(PR #9 리뷰), 그림자 실루엣 자체를 이
+ * 표정 블롭으로 교체했다 — 위험도가 오를수록 그림자 스스로 겁먹은 표정을
+ * 지어 보이는 연출이 된다. 회전(90도로 눕히는) 대신 전단만 쓰는 이유는
+ * 여전히 유효하다: 정면 그림을 그대로 눕히면 "그림자 같지 않다"는 피드백이
+ * 반복됐었다 — 실제 해질녘 그림자는 눕는 게 아니라 서 있는 실루엣 그대로
+ * 광원 반대 방향으로 길게 뻗기만 한다. 그래서 좌우 폭 축은 화면에서 항상
+ * 수평으로 두고(회전하지 않음), 아래(원점)부터 위까지의 높이 축만
+ * shadowAngle 방향으로 투영해 늘인다.
  *
  * 캔버스 변환으로는 ctx.transform(1, 0, -stretch·cosθ, -stretch·sinθ, 0, 0):
  * 로컬 y(발=0, 머리=-h)에 -stretch·(cosθ, sinθ)를 곱해 머리가 캐릭터 위치에서
@@ -620,6 +640,7 @@ function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: Chara
     characterPos,
     shadowAngle,
     bodyPose,
+    shadowExpression,
     deathInfo,
     round,
     cleared,
@@ -689,7 +710,7 @@ function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: Chara
 
   // 그림자 — 죽음 시퀀스 중에는 그리지 않는다(몸만 죽음 모션으로 표시)
   if (!dying) {
-    drawShadowSprite(ctx, sprites.body.idle, characterPos.x, characterPos.y, shadowAngle, aligned, time);
+    drawShadowSprite(ctx, sprites.shadow[shadowExpression], characterPos.x, characterPos.y, shadowAngle, aligned, time);
   }
 
   // 캐릭터 — 사망 시퀀스 중에는 현재/다음 죽음 프레임을 크로스페이드한다.
