@@ -1,0 +1,9 @@
+# 외부 에셋 출처 기록
+
+> 이미지 등 외부 에셋을 추가할 때마다 여기 한 줄씩 남긴다 (CLAUDE.md 규칙 — 출처·라이선스 확인 및 고지 필수).
+> AI 활용 기술 문서(P2 제출물)에도 이 목록을 반영한다.
+
+| 파일 경로 | 내용 | 생성 방법 / 출처 | 라이선스·사용 조건 | 추가일 |
+|-----------|------|------------------|---------------------|--------|
+| `characters/게임캐릭터.png` | 주인공 "그림자씨" 캐릭터 디자인 시트 원본 (턴어라운드·표정 6종·동작 5종·죽음 모션 4단계·팔레트) | ChatGPT(DALL·E) 이미지 생성 기능으로 직접 생성 | OpenAI 이용약관상 생성자(사용자) 소유 — 상업적 이용 관련 최신 약관은 제출 전 재확인 권장 | 2026-07-24 |
+| `characters/body-idle.png`, `body-idle-pose.png`, `body-walk.png`, `body-run.png`, `body-run-torso.png`, `body-run-legs.png`, `body-flinch.png`, `body-danger.png`, `body-death-pose.png`, `face-normal.png`, `face-surprised.png`, `face-scared.png`, `face-annoyed.png`, `face-disappointed.png`, `face-delighted.png`, `death1~4.png` | 위 원본 시트에서 `scripts/crop-regions.mjs`로 잘라낸 파생 스프라이트 18장 (배경은 코너 플러드필로 투명 처리) — `body-run-torso`/`body-run-legs`는 걷기 애니메이션을 상체(고정)·다리(좌우반전) 레이어로 분리 렌더링하기 위한 컷아웃 | 위 원본과 동일 | 위 원본과 동일 | 2026-07-24 |

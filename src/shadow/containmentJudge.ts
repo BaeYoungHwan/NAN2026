@@ -24,3 +24,13 @@ export function isShadowAligned(
   const diff = Math.abs(normalizeAngleDiff(shadowAngle - naturalAngle));
   return diff <= toleranceRadians;
 }
+
+/**
+ * 정렬 위험도 — 0은 완벽히 정렬(자연각과 정확히 일치), 1은 허용치 경계,
+ * 1 초과는 이탈(사망) 상태. 캐릭터 포즈·그림자 표정을 함께 결정하는
+ * 단일 신호로 쓴다 — PRD §7-2 캐릭터 스프라이트 연동.
+ */
+export function alignmentMargin(shadowAngle: number, naturalAngle: number, toleranceRadians: number): number {
+  const diff = Math.abs(normalizeAngleDiff(shadowAngle - naturalAngle));
+  return diff / toleranceRadians;
+}

@@ -11,8 +11,8 @@ import {
 } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
-import { naturalAngle, shadowTip } from "../shadow/shadowCaster";
-import { isShadowAligned } from "../shadow/containmentJudge";
+import { naturalAngle } from "../shadow/shadowCaster";
+import { alignmentMargin } from "../shadow/containmentJudge";
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -24,9 +24,116 @@ import {
 } from "../procgen/stageGenerator";
 import { applyLearning, cellKey, MAX_AI_BLOCKS } from "../ai/pathBlocker";
 import { drawStage } from "./drawStage";
+import {
+  loadCharacterSprites,
+  WALK_LEGS_OFFSET_X_PX,
+  WALK_LEGS_OFFSET_Y_PX,
+  WALK_TORSO_PIVOT_OFFSET_PX,
+  WALK_REFERENCE_HEIGHT_PX,
+  type BodyPose,
+  type CharacterSprites,
+} from "./characterSprites";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 const TARGET_RADIUS = 40; // 세이브 포인트·골 도달 판정 반경(px)
+const DEATH_ANIM_MS = 1600; // 사망 시 4단계 애니메이션을 보여주는 동안 멈추는 시간
+const BODY_DISPLAY_HEIGHT = 42; // 충돌 판정(CHARACTER_RADIUS)과 무관한 순수 표시 크기
+const CAMERA_ZOOM = 2.2; // 캐릭터를 따라다니며 확대하는 배율 — 맵 전체 대신 주변만 크게 보여준다
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+const DEATH_FRAMES: readonly Exclude<BodyPose, "walk">[] = ["death1", "death2", "death3", "death4"];
+
+/**
+ * 위험도(alignmentMargin)에 따라 몸 포즈를 고른다 — 값이 클수록(경계에 가까울수록)
+ * 더 위험한 포즈. 이동 중일 때는 위험도와 무관하게 항상 walk를 우선한다 — danger/
+ * flinch로 강제 전환하면 걷는 도중 정지 포즈로 뚝 끊겨 보이는 문제가 있었다.
+ * 이동 중 위험 표현은 drawWalkSprite의 떨림 폭을 위험도에 따라 키우는 것으로
+ * 대신한다.
+ */
+function selectBodyPose(margin: number, isMoving: boolean): BodyPose {
+  if (isMoving) return "walk";
+  if (margin >= 0.85) return "danger";
+  if (margin >= 0.6) return "flinch";
+  return "idle";
+}
+
+// 4단계를 균등 배분하지 않고, ①(비틀거리다 쓰러짐)은 넉넉히 줘서 회전 연출이
+// 읽히게 하고, ②③(그림자가 몸에서 빠져나감)은 길게, ④(빈 인형으로 남음)는
+// 끝에서 가장 오래 유지한다 — 각 시트 설명("경계를 벗어나면 크게 흔들린다"
+// 등)에 맞춘 타이밍.
+const DEATH_PHASE_BOUNDARIES = [0, 0.16, 0.44, 0.7, 1] as const;
+const DEATH_BLEND_WINDOW = 0.3; // 각 구간이 끝나기 전 이 비율만큼 다음 프레임과 겹쳐 크로스페이드
+const FALL_TILT_MAX = Math.PI / 2.6; // ①구간 동안 캐릭터가 쓰러지며 기우는 최대 각도(약 70도)
+
+interface DeathFrameInfo {
+  current: Exclude<BodyPose, "walk">;
+  next: Exclude<BodyPose, "walk">;
+  blend: number; // 0이면 current만, 1이면 next로 완전히 전환
+  isImpactPhase: boolean; // ① 구간 — 흔들림 연출 적용
+  impactFlash: number; // 사망 순간 1에서 시작해 ① 구간이 끝나며 0으로 사그라드는 화면 플래시 강도
+  impactPulse: number; // ①→②로 넘어가는 "쓰러지는 순간"에 짧게 솟는 펄스 — 착지 충격 강조
+  fallRotation: number; // ①구간 중 death1 프레임에만 적용하는 쓰러짐 회전각(라디안)
+  soulBob: number; // ②③구간(그림자가 몸을 빠져나가는 동안) 위아래로 떠다니는 오프셋(px)
+  vignette: number; // 사망이 진행될수록 짙어지는 화면 어두움 정도(0~1)
+}
+
+/** 사망 시퀀스 경과 시간(ms)으로 죽음 모션의 현재/다음 프레임과 크로스페이드 비율을 계산한다. */
+function deathFrameInfo(elapsedMs: number, totalMs: number, time: number): DeathFrameInfo {
+  const t = Math.min(1, elapsedMs / totalMs);
+  let phase = DEATH_FRAMES.length - 1;
+  for (let i = 0; i < DEATH_FRAMES.length; i++) {
+    if (t < DEATH_PHASE_BOUNDARIES[i + 1]) {
+      phase = i;
+      break;
+    }
+  }
+  const phaseStart = DEATH_PHASE_BOUNDARIES[phase];
+  const phaseEnd = DEATH_PHASE_BOUNDARIES[phase + 1] ?? 1;
+  const phaseProgress = phaseEnd > phaseStart ? (t - phaseStart) / (phaseEnd - phaseStart) : 1;
+  const nextPhase = Math.min(DEATH_FRAMES.length - 1, phase + 1);
+  const blendStart = 1 - DEATH_BLEND_WINDOW;
+  const blend = phase < DEATH_FRAMES.length - 1 && phaseProgress > blendStart ? (phaseProgress - blendStart) / DEATH_BLEND_WINDOW : 0;
+  const impactFlash = phase === 0 ? Math.max(0, 1 - phaseProgress * 1.4) : 0;
+
+  // 쓰러지는 순간(①→② 경계, t=phase0End)에 짧게 솟구쳤다 사그라드는 펄스 — 충격음 없이도 "쿵" 하는 무게감을 준다.
+  const phase0End = DEATH_PHASE_BOUNDARIES[1];
+  const impactPulse = Math.max(0, 1 - Math.abs(t - phase0End) / 0.05);
+
+  // death1은 원래 그림이 서있는 포즈라, ①구간 동안 가속하며(제자리서 휘청이다
+  // 쓰러지듯) 기울여서 death2(이미 누워있는 그림)로의 전환이 "쓰러짐"처럼
+  // 읽히게 한다. death2 이후 프레임은 그림 자체가 이미 누운 포즈라 회전을
+  // 얹지 않는다.
+  let fallRotation = 0;
+  if (phase === 0) {
+    const p = phaseProgress;
+    const wobble = Math.sin(time / 45) * 0.09 * (1 - p);
+    fallRotation = FALL_TILT_MAX * p * p + wobble;
+  }
+
+  // ②③구간(그림자가 몸에서 빠져나가 떠도는 동안) 전체를 은은하게 위아래로
+  // 띄워서 정지 사진 여러 장을 이어붙인 느낌 대신 계속 움직이는 인상을 준다.
+  const soulPhaseStart = DEATH_PHASE_BOUNDARIES[1];
+  const soulPhaseEnd = DEATH_PHASE_BOUNDARIES[3];
+  const soulEnvelope = t > soulPhaseStart && t < soulPhaseEnd ? Math.sin((Math.PI * (t - soulPhaseStart)) / (soulPhaseEnd - soulPhaseStart)) : 0;
+  const soulBob = Math.sin(time / 480) * 3 * soulEnvelope;
+
+  // 쓰러진 직후부터 서서히 화면을 어둡게 해 생명이 빠져나가는 분위기를 더한다.
+  const vignette = Math.min(1, Math.max(0, (t - phase0End) / (1 - phase0End))) * 0.35;
+
+  return {
+    current: DEATH_FRAMES[phase],
+    next: DEATH_FRAMES[nextPhase],
+    blend,
+    isImpactPhase: phase === 0,
+    impactFlash,
+    impactPulse,
+    fallRotation,
+    soulBob,
+    vignette,
+  };
+}
 
 export interface GameCanvasHandle {
   /** 캐릭터·그림자 각도·라운드·세이브 포인트를 스폰/1R 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
@@ -47,7 +154,8 @@ interface GameCanvasProps {
  * - 캐릭터는 WASD로 이동 (벽 충돌 반영)
  * - 그림자는 , . 로 직접 회전 (광원 위치와 무관, 자동 복귀 없음)
  * - 안전 구역(캐릭터 뒤, 광원 반대 방향 ± 허용각)은 광원-캐릭터 위치로 매 프레임 재계산됨
- * - 그림자 각도가 안전 구역을 벗어나면 즉시 마지막 세이브 포인트로 리셋
+ * - 그림자 각도가 안전 구역을 벗어나면 사망 시퀀스(4단계 애니메이션, 약 1.6초) 후
+ *   마지막 세이브 포인트로 리셋
  * - 하나의 스테이지(같은 통로)를 세이브 포인트로 구간을 나눠 1R→2R→3R 순서로
  *   이어서 진행한다. 세이브 포인트 통과 시 캐릭터 위치는 그대로 두고 다음
  *   라운드로 즉시 전환하며(텔레포트 없음), 그 지점이 새 리스폰 기준이 된다.
@@ -55,6 +163,7 @@ interface GameCanvasProps {
  *   가이드라인(부채꼴)을 보여주고, 2R부터는 가이드라인을 숨긴다(그림자 색상
  *   피드백은 유지). 3R 디메리트: 허용 각도 축소 + WASD 이동키 상하좌우
  *   반전(그림자 회전키는 영향 없음) — PRD §7-1.
+ * - 캐릭터 몸 포즈·그림자 표정은 alignmentMargin(위험도) 기준으로 함께 전환된다 — PRD §7-2.
  * - 이동 패턴 학습 AI(단순 빈도 기반, PRD §12): 캐릭터가 새 셀에 들어갈 때마다
  *   방문 횟수를 누적하고, 재시작 시 가장 자주 지나간 셀 중 스테이지를 풀 수
  *   없게 만들지 않는 셀만 골라 벽으로 추가한다(`src/ai/pathBlocker.ts`). 학습은
@@ -89,6 +198,24 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const lastVisitedCellKeyRef = useRef<string | null>(null);
   // stage 참조가 바뀔 때만(=재시작 시) 충돌판정 함수를 새로 만든다 — 매 프레임 재생성 방지.
   const colliderCacheRef = useRef<{ stage: Stage; canOccupy: (point: Point) => boolean } | null>(null);
+  // 사망 시퀀스 진행 상태 — true인 동안 게임플레이가 멈추고 죽음 모션이 재생된다.
+  const dyingRef = useRef(false);
+  const deathAnimStartRef = useRef(0);
+  // 마지막 수평 이동 방향 — 스프라이트가 원본은 오른쪽을 보고 있으므로 왼쪽 이동 시 좌우 반전한다.
+  const facingRightRef = useRef(true);
+  const [sprites, setSprites] = useState<CharacterSprites | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCharacterSprites()
+      .then((loaded) => {
+        if (!cancelled) setSprites(loaded);
+      })
+      .catch((error) => console.error(error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useImperativeHandle(
     ref,
@@ -103,6 +230,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         savePointRef.current = { ...nextStage.spawn };
         roundRef.current = 1;
         lastVisitedCellKeyRef.current = null;
+        dyingRef.current = false;
+        facingRightRef.current = true;
         onRoundChange?.(1, false);
         clearedRef.current = false;
       },
@@ -112,7 +241,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !sprites) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -125,7 +254,17 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       lastTime = time;
       const stage = stageRef.current;
 
-      if (!clearedRef.current && !inputDisabled) {
+      if (dyingRef.current) {
+        if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
+          characterRef.current = { ...savePointRef.current };
+          shadowAngleRef.current = naturalAngle(stage.lightPos, savePointRef.current);
+          // 죽기 직전 이동 방향이 남아있으면, 리스폰 직후 실제 이동 방향과 무관하게
+          // 죽던 순간 보고 있던 방향을 그대로 유지해 버려서 캐릭터가 엉뚱한 쪽을
+          // 보며 달리는 것처럼 보인다 — 리스폰 시 기본 방향(오른쪽)으로 되돌린다.
+          facingRightRef.current = true;
+          dyingRef.current = false;
+        }
+      } else if (!clearedRef.current && !inputDisabled) {
         if (colliderCacheRef.current?.stage !== stage) {
           colliderCacheRef.current = { stage, canOccupy: createGridCollider(stage.grid, CHARACTER_RADIUS) };
         }
@@ -150,11 +289,11 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
         const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
         const natural = naturalAngle(stage.lightPos, characterRef.current);
-        const aligned = isShadowAligned(shadowAngleRef.current, natural, tolerance);
+        const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
 
-        if (!aligned) {
-          characterRef.current = { ...savePointRef.current };
-          shadowAngleRef.current = naturalAngle(stage.lightPos, savePointRef.current);
+        if (margin > 1) {
+          dyingRef.current = true;
+          deathAnimStartRef.current = time;
           deathCountRef.current += 1;
           onDeathCountChange?.(deathCountRef.current);
         }
@@ -173,36 +312,295 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         }
       }
 
-      renderFrame(ctx, stage, characterRef.current, shadowAngleRef.current, roundRef.current, clearedRef.current);
+      // 렌더용 위험도/포즈 — 사망 리셋 등으로 위치가 막 바뀌었을 수 있어 매 프레임 다시 계산한다.
+      const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
+      const natural = naturalAngle(stage.lightPos, characterRef.current);
+      const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
+      const facingInput = controlsReversed(roundRef.current)
+        ? reverseMoveInput(inputRef.current)
+        : inputRef.current;
+      if (facingInput.right) facingRightRef.current = true;
+      else if (facingInput.left) facingRightRef.current = false;
+      const isMoving = facingInput.up || facingInput.down || facingInput.left || facingInput.right;
+      const deathInfo = dyingRef.current
+        ? deathFrameInfo(time - deathAnimStartRef.current, DEATH_ANIM_MS, time)
+        : undefined;
+      const bodyPose: BodyPose = deathInfo ? deathInfo.current : selectBodyPose(margin, isMoving);
+
+      renderFrame(ctx, stage, sprites, {
+        characterPos: characterRef.current,
+        shadowAngle: shadowAngleRef.current,
+        bodyPose,
+        deathInfo,
+        round: roundRef.current,
+        cleared: clearedRef.current,
+        dying: dyingRef.current,
+        aligned: margin <= 1,
+        margin,
+        tolerance,
+        natural,
+        time,
+        facingRight: facingRightRef.current,
+      });
 
       frameId = requestAnimationFrame(draw);
     };
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites]);
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
 });
 
 export default GameCanvas;
 
-function renderFrame(
+interface RenderState {
+  characterPos: Point;
+  shadowAngle: number;
+  bodyPose: BodyPose;
+  /** 사망 시퀀스 중일 때만 존재 — 프레임 간 크로스페이드·흔들림 연출에 쓴다. */
+  deathInfo?: DeathFrameInfo;
+  round: Round;
+  cleared: boolean;
+  dying: boolean;
+  aligned: boolean;
+  /** 위험도(alignmentMargin) — 이동 컷아웃의 떨림 강도 계산에 쓴다. */
+  margin: number;
+  tolerance: number;
+  natural: number;
+  /** requestAnimationFrame의 timestamp(ms) — 절차적 모션(숨쉬기·걷기 흔들림)의 위상 계산용. */
+  time: number;
+  /** 마지막 수평 이동 방향(오른쪽=true) — 스프라이트 좌우 반전에 쓴다. */
+  facingRight: boolean;
+}
+
+/**
+ * 정지 이미지 한 장씩만 있어 포즈 전환만으로는 "움직이는 느낌"이 나지 않는 문제를
+ * 절차적 모션(바운스·떨림)으로 보완한다 — 새 아트 없이 코드만으로. walk(이동)는
+ * 이 함수를 안 거치고 drawWalkSprite로 별도 처리한다(2프레임 걷기 사이클).
+ */
+function bodyBobOffset(pose: Exclude<BodyPose, "walk">, time: number): { x: number; y: number } {
+  switch (pose) {
+    case "idle":
+      return { x: 0, y: Math.sin(time / 450) * 2 }; // 숨쉬기처럼 느린 상하 흔들림
+    case "flinch":
+      return { x: Math.sin(time / 60) * 2, y: 0 }; // 미세한 좌우 떨림
+    case "danger":
+      return { x: Math.sin(time / 35) * 4, y: 0 }; // 더 크고 빠른 떨림
+    default:
+      return { x: 0, y: 0 }; // 죽음 모션 4단계는 정지 프레임 그대로
+  }
+}
+
+function drawBodySprite(
   ctx: CanvasRenderingContext2D,
-  stage: Stage,
-  characterPos: Point,
-  shadowAngle: number,
-  round: Round,
-  cleared: boolean,
+  img: HTMLImageElement,
+  feetX: number,
+  feetY: number,
+  pose: Exclude<BodyPose, "walk">,
+  time: number,
+  facingRight: boolean,
 ) {
+  const scale = BODY_DISPLAY_HEIGHT / img.naturalHeight;
+  const w = img.naturalWidth * scale;
+  const h = BODY_DISPLAY_HEIGHT;
+  const bob = bodyBobOffset(pose, time);
+
+  ctx.save();
+  ctx.translate(feetX + bob.x, feetY - bob.y);
+  // 스프라이트 원본이 오른쪽을 보고 있다고 가정 — 왼쪽으로 이동 중이면 좌우 반전.
+  ctx.scale(facingRight ? 1 : -1, 1);
+  ctx.drawImage(img, -w / 2, -h, w, h);
+  ctx.restore();
+}
+
+const WALK_FRAME_MS = 160; // 두 프레임을 번갈아 보여주는 간격 — 너무 빠르면 떨림처럼, 너무 느리면 뚝뚝 끊겨 보인다.
+
+const WALK_LEAN_RADIANS = 0.18; // 달리는 동안 몸 전체가 발(축)을 기준으로 진행 방향으로 기울어지는 각도(~10도)
+
+/**
+ * 이동(walk) 렌더링 — 시행착오 기록은 characterSprites.ts 상단 주석 참고.
+ * 최종적으로는 상체(코트+머리, body-run-torso.png)를 고정으로 그리고, 다리
+ * 컷아웃(body-run-legs.png)만 프레임마다 좌우 반전해서 겹친다. 다리는 좌/우가
+ * 대략 대칭이라 반전해도 "반대쪽 다리가 앞으로 나온" 자연스러운 스텝으로
+ * 읽히지만, 상체는 절대 반전되지 않으므로 걷는 내내 얼굴·몸통 방향이 흔들리지
+ * 않는다 — 진짜 좌우 교대 스텝 + 고정된 얼굴 방향을 동시에 만족한다.
+ * (facingRight로 인한 전체 반전은 여전히 이동 방향에 따라 매 프레임 적용된다.)
+ * 또한 몸 전체를 발을 축으로 진행 방향으로 살짝 기울여(WALK_LEAN_RADIANS)
+ * "제자리에서 위치만 바뀌는" 게 아니라 실제로 달리며 앞으로 쏠리는 느낌을 준다.
+ * margin(위험도)이 높을수록 좌우 떨림을 더해 이동 중에도 위험을 표현한다.
+ */
+function drawWalkSprite(
+  ctx: CanvasRenderingContext2D,
+  torso: HTMLImageElement,
+  legs: HTMLImageElement,
+  legsMirrored: HTMLImageElement,
+  feetX: number,
+  feetY: number,
+  time: number,
+  facingRight: boolean,
+  margin: number,
+) {
+  const isLeftStep = Math.floor(time / WALK_FRAME_MS) % 2 === 0;
+  const legsImg = isLeftStep ? legs : legsMirrored;
+  const bounce = Math.abs(Math.sin(time / 90)) * 6;
+  // 0(안전)~1(경계)은 떨림 없음, 그 이상(이탈 근접)부터 서서히 떨림이 붙는다.
+  const danger = clamp((margin - 0.6) / 0.4, 0, 1);
+  const jitterX = danger * Math.sin(time / 35) * 3;
+
+  // 상체·다리가 같은 원본 시트에서 나온 크롭이라, 공통 기준 높이(200px =
+  // 분리 전 body-run.png 높이)로 스케일을 통일해야 서로 어긋나지 않는다.
+  const scale = BODY_DISPLAY_HEIGHT / WALK_REFERENCE_HEIGHT_PX;
+  const h = BODY_DISPLAY_HEIGHT;
+  const pivotX = -WALK_TORSO_PIVOT_OFFSET_PX * scale;
+  const torsoW = torso.naturalWidth * scale;
+  const torsoH = torso.naturalHeight * scale;
+  const legsW = legsImg.naturalWidth * scale;
+  const legsH = legsImg.naturalHeight * scale;
+  const legsX = pivotX + WALK_LEGS_OFFSET_X_PX * scale;
+  const legsY = -h + WALK_LEGS_OFFSET_Y_PX * scale;
+
+  ctx.save();
+  ctx.translate(feetX + jitterX, feetY - bounce);
+  // 스프라이트 원본이 오른쪽을 보고 있다고 가정 — 왼쪽으로 이동 중이면 좌우
+  // 반전. 반전 다음에 회전을 걸어서, 회전이 항상 "반전 이후의 진행 방향"으로
+  // 기울어지게 한다(왼쪽으로 갈 땐 왼쪽으로, 오른쪽으로 갈 땐 오른쪽으로).
+  ctx.scale(facingRight ? 1 : -1, 1);
+  ctx.rotate(WALK_LEAN_RADIANS);
+  // 다리를 먼저 그리고 상체를 위에 덮어, 상체·다리 크롭이 겹치는 hip 부근
+  // 이음매(코트 밑단)는 항상 반전되지 않는 상체 쪽 그림이 덮어 가려준다.
+  ctx.drawImage(legsImg, legsX, legsY, legsW, legsH);
+  ctx.drawImage(torso, pivotX, -h, torsoW, torsoH);
+  ctx.restore();
+}
+
+// 뭉게뭉게 겹친 원 여러 개로 만화적인 "먼지 구름" 윤곽 하나를 이룬다 — 상대
+// 위치(cx,cy)와 반지름 배율(rScale)을 고정 배치해, 매 발걸음마다 같은
+// 구름 모양이 커졌다 사그라드는 식으로 반복된다(공 하나짜리 그러데이션과
+// 달리 울퉁불퉁한 뭉게구름 실루엣으로 읽힌다).
+const DUST_CLOUD_LOBES: readonly [number, number, number][] = [
+  [0, 0, 1],
+  [-3, -1.5, 0.7],
+  [3, -1, 0.75],
+  [0.5, -3, 0.6],
+  [-1.5, 1.5, 0.55],
+];
+
+/**
+ * 발을 내딛을 때 발치에서 뭉게뭉게 부풀어 오르는 먼지 구름 — 그러데이션
+ * 공 하나(빛나는 구슬 같다는 피드백), 스피드 라인(촌스럽다는 피드백), 흩날리는
+ * 작은 알갱이(효과 같지 않다는 피드백)를 모두 거쳐, 만화에서 흔히 쓰는
+ * "겹친 원 뭉치 = 뭉게구름" 실루엣으로 다시 만들었다. 다리 회전 변환 밖
+ * (독립 좌표계)에서 그려 다리처럼 통째로 흔들리지 않지만, 발이 실제로 딛는
+ * 지점에서 부풀어 오르므로 "발에서 생기는" 이펙트로 보인다.
+ */
+function drawRunDustEffect(ctx: CanvasRenderingContext2D, feetX: number, feetY: number, time: number, facingRight: boolean) {
+  const stepPeriod = 90 * Math.PI; // 다리 스윙 반주기(발 교대 간격)와 동일하게 맞춘 값
+  const stepAge = (time % stepPeriod) / stepPeriod; // 0(막 디딤)~1(다음 걸음 직전)
+  const dir = facingRight ? -1 : 1; // 이동 방향의 반대(뒤)쪽
+
+  const alpha = Math.max(0, 1 - stepAge * 1.3) * 0.42;
+  if (alpha <= 0.02) return;
+
+  const baseRadius = 3 + stepAge * 5; // 갓 튀었을 땐 작다가 부풀어 오름
+  const cx = dir * (5 + stepAge * 7);
+  const cy = -2 - stepAge * 2;
+
+  ctx.save();
+  ctx.translate(feetX + cx, feetY + cy);
+  ctx.filter = "blur(0.6px)";
+  ctx.fillStyle = `rgba(200, 196, 188, ${alpha})`;
+  for (const [lobeX, lobeY, lobeScale] of DUST_CLOUD_LOBES) {
+    ctx.beginPath();
+    ctx.arc(dir * lobeX, lobeY, baseRadius * lobeScale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * 그림자 — 캐릭터 실루엣을 "해질녘 긴 그림자"처럼 전단(shear) 변환으로
+ * 늘여서 그린다. 서 있는 캐릭터를 90도로 눕히는(회전) 방식은 정면 그림이
+ * 옆으로 자빠진 것처럼 보여 "캐릭터 그림자 같지 않다"는 피드백이 반복됐다 —
+ * 실제 해질녘 그림자는 사람이 눕는 게 아니라 서 있는 실루엣 그대로 광원
+ * 반대 방향으로 길게 뻗기만 한다. 그래서 캐릭터의 좌우 폭 축은 화면에서
+ * 항상 그대로 수평으로 두고(회전하지 않음), 발(원점)부터 머리까지의 높이
+ * 축만 shadowAngle 방향으로 투영해 늘인다 — 캐릭터 본체와 완전히 같은
+ * 실루엣이 그대로 원근만 달라진 모양이라 "캐릭터에서 생긴 그림자"로 읽힌다.
+ *
+ * 캔버스 변환으로는 ctx.transform(1, 0, -stretch·cosθ, -stretch·sinθ, 0, 0):
+ * 로컬 y(발=0, 머리=-h)에 -stretch·(cosθ, sinθ)를 곱해 머리가 캐릭터 위치에서
+ * shadowAngle 방향으로 SHADOW_LENGTH만큼 떨어진 지점에 오도록 하고, 로컬
+ * x(폭)는 그대로 둬 폭 축이 화면 수평을 유지한다(shadowTip 공식과 동일한
+ * cos/sin 규약).
+ */
+function drawShadowSprite(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  originX: number,
+  originY: number,
+  shadowAngle: number,
+  aligned: boolean,
+  time: number,
+) {
+  const pulse = 1 + Math.sin(time / 300) * 0.04;
+  const scale = BODY_DISPLAY_HEIGHT / img.naturalHeight;
+  const w = img.naturalWidth * scale;
+  const h = img.naturalHeight * scale;
+  const stretch = (SHADOW_LENGTH / h) * pulse;
+  // 전단 변환만 거치면 실루엣이 딱딱한 판때기(사다리꼴) 윤곽으로 보인다는
+  // 피드백 — 가장자리를 블러로 부드럽게 풀어 윤곽선을 흐릿하게 만들고,
+  // 완전한 검정에 가깝게 어둡혀 그림자다운 무게감을 준다.
+  const tint = aligned ? "brightness(0)" : "brightness(0.4) sepia(1) hue-rotate(-50deg) saturate(5)";
+
+  ctx.save();
+  ctx.translate(originX, originY);
+  ctx.transform(1, 0, -stretch * Math.cos(shadowAngle), -stretch * Math.sin(shadowAngle), 0, 0);
+  ctx.filter = `${tint} blur(2px)`;
+  ctx.globalAlpha = 0.88;
+  // drawBodySprite와 동일한 앵커(발=원점, 머리=-h 방향)를 그대로 재사용한다.
+  ctx.drawImage(img, -w / 2, -h, w, h);
+  ctx.restore();
+}
+
+function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: CharacterSprites, state: RenderState) {
+  const {
+    characterPos,
+    shadowAngle,
+    bodyPose,
+    deathInfo,
+    round,
+    cleared,
+    dying,
+    aligned,
+    margin,
+    tolerance,
+    natural,
+    time,
+    facingRight,
+  } = state;
+
+  // 매 프레임 시작 시 변환 행렬을 단위 행렬로 강제 초기화 — save/restore가
+  // 코드상 균형이 맞더라도(각 draw 함수 내부에서 항상 짝을 맞춤), 이 값에
+  // 의존하지 않고 방어적으로 리셋해 프레임 간 변환이 누적되는 것을 막는다.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#111";
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-  drawStage(ctx, stage);
+  // 카메라 — 캐릭터를 화면 중앙에 두고 확대해서, 맵 전체를 축소해 보여주는 대신
+  // 캐릭터 주변을 크게 보여준다(시트의 "인게임 느낌" 목업 참고). 맵 가장자리를
+  // 벗어나 빈 공간이 보이지 않도록 카메라 위치를 맵 범위 안으로 클램프한다.
+  const viewW = CANVAS_WIDTH / CAMERA_ZOOM;
+  const viewH = CANVAS_HEIGHT / CAMERA_ZOOM;
+  const camX = clamp(characterPos.x - viewW / 2, 0, CANVAS_WIDTH - viewW);
+  const camY = clamp(characterPos.y - viewH / 2, 0, CANVAS_HEIGHT - viewH);
 
-  const tolerance = effectiveAngleTolerance(round, SAFE_ANGLE_TOLERANCE);
-  const natural = naturalAngle(stage.lightPos, characterPos);
-  const aligned = isShadowAligned(shadowAngle, natural, tolerance);
+  ctx.save();
+  ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
+  ctx.translate(-camX, -camY);
+
+  drawStage(ctx, stage);
 
   // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
   if (isGuideVisible(round)) {
@@ -223,20 +621,69 @@ function renderFrame(
   ctx.arc(stage.lightPos.x, stage.lightPos.y, 8, 0, Math.PI * 2);
   ctx.fill();
 
-  // 그림자 — 정렬 여부에 따라 색을 바꿔 즉각적인 시각 피드백을 준다 (라운드 무관 항상 표시)
-  const tip = shadowTip(characterPos, shadowAngle, SHADOW_LENGTH);
-  ctx.strokeStyle = aligned ? "#4caf50" : "#e53935";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(characterPos.x, characterPos.y);
-  ctx.lineTo(tip.x, tip.y);
-  ctx.stroke();
+  // 그림자 — 죽음 시퀀스 중에는 그리지 않는다(몸만 죽음 모션으로 표시)
+  if (!dying) {
+    drawShadowSprite(ctx, sprites.body.idle, characterPos.x, characterPos.y, shadowAngle, aligned, time);
+  }
 
-  // 캐릭터
-  ctx.fillStyle = "#eee";
-  ctx.beginPath();
-  ctx.arc(characterPos.x, characterPos.y, CHARACTER_RADIUS, 0, Math.PI * 2);
-  ctx.fill();
+  // 캐릭터 — 사망 시퀀스 중에는 현재/다음 죽음 프레임을 크로스페이드한다.
+  // 임팩트 구간(①)에서는 짧게 떨고, ①→②로 넘어가며 쓰러지는 순간(impactPulse)엔
+  // 더 크게 흔들려 "쿵" 하는 충격을 준다. death1(서있는 그림)에만 fallRotation을
+  // 얹어 death2(이미 누운 그림)로의 전환이 쓰러지는 동작처럼 보이게 하고,
+  // ②③구간에는 soulBob으로 은은하게 떠다니는 움직임을 더한다.
+  if (deathInfo) {
+    const jolt = deathInfo.impactPulse * 8;
+    const shakeAmount = (deathInfo.isImpactPhase ? deathInfo.impactFlash * 6 : 0) + jolt;
+    const shakeX = Math.sin(time / 20) * shakeAmount;
+    const shakeY = Math.cos(time / 27) * shakeAmount * 0.6 + deathInfo.soulBob;
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    if (deathInfo.fallRotation !== 0) {
+      ctx.save();
+      ctx.translate(characterPos.x, characterPos.y);
+      ctx.rotate(deathInfo.fallRotation);
+      ctx.translate(-characterPos.x, -characterPos.y);
+    }
+    drawBodySprite(ctx, sprites.body[deathInfo.current], characterPos.x, characterPos.y, deathInfo.current, time, facingRight);
+    if (deathInfo.fallRotation !== 0) ctx.restore();
+
+    if (deathInfo.blend > 0) {
+      ctx.globalAlpha = deathInfo.blend;
+      drawBodySprite(ctx, sprites.body[deathInfo.next], characterPos.x, characterPos.y, deathInfo.next, time, facingRight);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  } else if (bodyPose === "walk") {
+    drawRunDustEffect(ctx, characterPos.x, characterPos.y, time, facingRight);
+    drawWalkSprite(
+      ctx,
+      sprites.walkTorso,
+      sprites.walkLegs,
+      sprites.walkLegsMirrored,
+      characterPos.x,
+      characterPos.y,
+      time,
+      facingRight,
+      margin,
+    );
+  } else {
+    drawBodySprite(ctx, sprites.body[bodyPose], characterPos.x, characterPos.y, bodyPose, time, facingRight);
+  }
+
+  ctx.restore();
+
+  // 비네트 — 쓰러진 뒤부터 서서히 화면을 어둡게 해 생명이 빠져나가는 분위기를 준다.
+  if (deathInfo && deathInfo.vignette > 0) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${deathInfo.vignette})`;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  }
+
+  // 임팩트 플래시 — 카메라 변환과 무관한 화면 전체 오버레이(경계 이탈 순간 붉게 번쩍).
+  if (deathInfo && deathInfo.impactFlash > 0) {
+    ctx.fillStyle = `rgba(180, 20, 20, ${deathInfo.impactFlash * 0.5})`;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  }
 
   if (cleared) {
     ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
