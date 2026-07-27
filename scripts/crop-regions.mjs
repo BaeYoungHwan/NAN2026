@@ -7,7 +7,10 @@ import sharp from "sharp";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
-const SHEET_PATH = "public/assets/characters/게임캐릭터.png";
+// 원본 시트는 public/이 아니라 scripts/ 아래 둔다 — 이 1회성 스크립트에서만
+// 참조되고 런타임 게임 코드는 잘라낸 개별 PNG만 로드하므로, public/에 두면
+// Vite 빌드 시 dist에 그대로 복사되어 배포 용량만 늘어난다(PR #9 리뷰 반영).
+const SHEET_PATH = "scripts/게임캐릭터.png";
 const OUT_DIR = "public/assets/characters";
 const PREVIEW_PATH = "scripts/preview.png";
 
