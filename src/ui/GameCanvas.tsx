@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
 import {
@@ -53,7 +54,7 @@ const DEATH_FRAMES: readonly Exclude<BodyPose, "walk">[] = ["death1", "death2", 
  * 이동 중 위험 표현은 drawWalkSprite의 떨림 폭을 위험도에 따라 키우는 것으로
  * 대신한다.
  */
-function selectBodyPose(margin: number, isMoving: boolean): BodyPose {
+export function selectBodyPose(margin: number, isMoving: boolean): BodyPose {
   if (isMoving) return "walk";
   if (margin >= 0.85) return "danger";
   if (margin >= 0.6) return "flinch";
@@ -68,7 +69,7 @@ const DEATH_PHASE_BOUNDARIES = [0, 0.16, 0.44, 0.7, 1] as const;
 const DEATH_BLEND_WINDOW = 0.3; // 각 구간이 끝나기 전 이 비율만큼 다음 프레임과 겹쳐 크로스페이드
 const FALL_TILT_MAX = Math.PI / 2.6; // ①구간 동안 캐릭터가 쓰러지며 기우는 최대 각도(약 70도)
 
-interface DeathFrameInfo {
+export interface DeathFrameInfo {
   current: Exclude<BodyPose, "walk">;
   next: Exclude<BodyPose, "walk">;
   blend: number; // 0이면 current만, 1이면 next로 완전히 전환
@@ -81,7 +82,7 @@ interface DeathFrameInfo {
 }
 
 /** 사망 시퀀스 경과 시간(ms)으로 죽음 모션의 현재/다음 프레임과 크로스페이드 비율을 계산한다. */
-function deathFrameInfo(elapsedMs: number, totalMs: number, time: number): DeathFrameInfo {
+export function deathFrameInfo(elapsedMs: number, totalMs: number, time: number): DeathFrameInfo {
   const t = Math.min(1, elapsedMs / totalMs);
   let phase = DEATH_FRAMES.length - 1;
   for (let i = 0; i < DEATH_FRAMES.length; i++) {
@@ -381,10 +382,29 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     return () => cancelAnimationFrame(frameId);
   }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites]);
 
-  return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />;
+  return (
+    <>
+      <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />
+      {/* 스프라이트 로딩 완료 전에는 게임 루프가 시작되지 않아 캔버스가 비어
+          보인다 — 이미지 20여 장을 순차 로드하는 배포 환경(GitHub Pages)에서
+          "멈춘 화면"으로 오인되지 않도록 안내 텍스트를 겹쳐 보여준다. */}
+      {!sprites && <div style={loadingStyle}>불러오는 중...</div>}
+    </>
+  );
 });
 
 export default GameCanvas;
+
+const loadingStyle: CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  left: "50%",
+  transform: "translate(-50%, -50%)",
+  color: "#eee",
+  fontFamily: "sans-serif",
+  fontSize: 16,
+  pointerEvents: "none",
+};
 
 interface RenderState {
   characterPos: Point;
