@@ -1,0 +1,62 @@
+import { useEffect, useRef } from "react";
+
+export interface InputState {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  /** ',' — 그림자 시계방향 회전 */
+  rotateCW: boolean;
+  /** '.' — 그림자 반시계방향 회전 */
+  rotateCCW: boolean;
+}
+
+const KEY_MAP: Record<string, keyof InputState> = {
+  w: "up",
+  ArrowUp: "up",
+  s: "down",
+  ArrowDown: "down",
+  a: "left",
+  ArrowLeft: "left",
+  d: "right",
+  ArrowRight: "right",
+  ",": "rotateCW",
+  ".": "rotateCCW",
+};
+
+/**
+ * WASD(이동) + , . (그림자 회전) 입력을 추적하는 훅. 렌더를 유발하지
+ * 않도록 ref로 보관하고, 게임 루프(requestAnimationFrame)가 매 프레임 직접 읽는다.
+ */
+export function useKeyboardInput() {
+  const inputRef = useRef<InputState>({
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    rotateCW: false,
+    rotateCCW: false,
+  });
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = KEY_MAP[event.key];
+      if (key) inputRef.current[key] = true;
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      const key = KEY_MAP[event.key];
+      if (key) inputRef.current[key] = false;
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  return inputRef;
+}

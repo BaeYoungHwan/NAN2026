@@ -2,6 +2,8 @@
 
 > 출처: `docs/design-docs/adr/ADR-001-shadow-boundary-judgment.md` 결정 + 팀 역할 분담(`TeamMate.md`)
 > 생성: 2026-07-23
+>
+> **2026-07-23 추가**: 아래 태스크는 완료 당시(ADR-001, 레벨 고정 폴리곤 모델) 기준 기록이다. 실제 플레이 테스트 결과 메커니즘이 "캐릭터+그림자 이중 조작 / 캐릭터 부착 안전 구역"으로 정정되어 `fix/shadow-dual-control` 브랜치에서 ShadowCaster·ContainmentJudge·GameCanvas를 다시 구현했다. 최신 설계는 [`ADR-002`](../../design-docs/adr/ADR-002-shadow-dual-control.md)와 [`shadow-mechanic-diagram.md`](../../design-docs/shadow-mechanic-diagram.md) 참고. 아래 체크박스는 "해당 시점에 완료됨"의 기록이며 세부 서술(선분/폴리곤 등)은 최신 문서 기준으로 다시 읽을 것.
 
 ## 목표
 
@@ -9,14 +11,14 @@ Shadow-Step 레포 골격을 세우고, 그림자 계산(ShadowCaster)·경계 �
 
 ## 태스크
 
-- [ ] 레포 폴더 구조 생성 (`src/ui`, `src/shadow`, `src/physics`, `src/procgen`, `src/ai`, `src/entities`, `src/core`) — 담당: 배영환
-- [ ] React + TypeScript + Canvas 셋업, Hello World 렌더 확인 — 담당: 송원호
-- [ ] `Stage` 데이터 계약 타입 정의 (`lightPos`, `boundaryPolygon`, `obstacles`, `spawn`) — 담당: 배영환
-- [ ] ShadowCaster 구현 (광원+캐릭터 위치 → 그림자 선분, `d = normalize(C - L)`, `tip = C + d·ℓ`) — 담당: 배영환
-- [ ] ContainmentJudge 구현 (point-in-polygon + 선분-다각형 교차) + 경계 케이스 단위 테스트 (정점 접촉, 공선) — 담당: 배영환
-- [ ] 임시 정적 스테이지(경계 다각형 하드코딩)로 캐릭터 이동 + 그림자 + 판정 결과 시각화 프로토타입 — 담당: 송원호
-- [ ] 60 FPS 프레임타임 측정 (저사양 환경 시뮬레이션 포함) — 담당: 배영환·송원호
-- [ ] GitHub Pages 배포 파이프라인 초안 구성 — 담당: 배영환
+- [x] 레포 폴더 구조 생성 (`src/ui`, `src/shadow`, `src/physics`, `src/procgen`, `src/ai`, `src/entities`, `src/core`) — 담당: 배영환 — `feature/repo-scaffold` 병합 완료
+- [x] React + TypeScript + Canvas 셋업, Hello World 렌더 확인 — 담당: 송원호 — `feature/canvas-setup` 병합 완료, 브라우저 실확인 완료
+- [x] `Stage` 데이터 계약 타입 정의 (`lightPos`, `boundaryPolygon`, `obstacles`, `spawn`) — 담당: 배영환 — `src/core/stage.ts`
+- [x] ShadowCaster 구현 (광원+캐릭터 위치 → 그림자 선분, `d = normalize(C - L)`, `tip = C + d·ℓ`) — 담당: 배영환 — `feature/shadow-core` 병합 완료, 단위 테스트 포함
+- [x] ContainmentJudge 구현 (point-in-polygon + 선분-다각형 교차) + 경계 케이스 단위 테스트 (정점 접촉, 공선) — 담당: 배영환 — `feature/shadow-core` 병합 완료
+- [x] 임시 정적 스테이지(경계 다각형 하드코딩)로 캐릭터 이동 + 그림자 + 판정 결과 시각화 프로토타입 — 담당: 송원호 — `feature/render-prototype` 병합 완료, 브라우저 실확인 완료 (스폰 좌표 버그 발견·수정)
+- [x] 60 FPS 프레임타임 측정 (저사양 환경 시뮬레이션 포함) — 담당: 배영환·송원호 — 실측 60.08 FPS (rAF 3초 측정, 저사양 시뮬레이션은 미실시)
+- [x] GitHub Pages 배포 파이프라인 초안 구성 — 담당: 배영환 — `feature/pages-deploy` 병합 완료 (`.github/workflows/deploy-pages.yml`, main push 시 자동 배포)
 
 ## 브랜치 전략
 
@@ -38,10 +40,10 @@ Shadow-Step 레포 골격을 세우고, 그림자 계산(ShadowCaster)·경계 �
 
 ## 검증 기준
 
-- [ ] 그림자 선분이 광원-캐릭터 위치에 맞춰 매 프레임 시각적으로 정확히 그려짐
-- [ ] 경계 이탈 시 정확히 사망 판정, 정점/공선 경계 케이스에서도 "억울한 죽음" 없음
-- [ ] 60 FPS 유지 확인 (Chrome/Edge)
-- [ ] GitHub Pages 링크로 배포 및 접속 확인 (설치 없이 브라우저 플레이)
+- [x] 그림자 선분이 광원-캐릭터 위치에 맞춰 매 프레임 시각적으로 정확히 그려짐 — Chrome DevTools 스크린샷으로 확인
+- [x] 경계 이탈 시 정확히 사망 판정, 정점/공선 경계 케이스에서도 "억울한 죽음" 없음 — 단위 테스트 + 브라우저 실측 (좌우 이동 시 오탐 없음 확인). 정점/공선은 단위 테스트만 커버, 브라우저 실측은 일반 이동 케이스만
+- [x] 60 FPS 유지 확인 (Chrome/Edge) — 실측 60.08 FPS. Edge에서는 미확인, 저사양 환경 시뮬레이션도 미실시
+- [ ] GitHub Pages 링크로 배포 및 접속 확인 (설치 없이 브라우저 플레이) — 워크플로는 구성 완료, 실제 배포는 `develop→main` 병합 + 저장소 Settings→Pages→Source를 GitHub Actions로 전환 후 확인 가능
 
 ## 미결 (Phase 1 진행 중 결정 필요)
 
