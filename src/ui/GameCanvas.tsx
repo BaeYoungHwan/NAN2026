@@ -26,6 +26,7 @@ import {
 } from "../procgen/stageGenerator";
 import { applyLearning, cellKey, MAX_AI_BLOCKS } from "../ai/pathBlocker";
 import { drawStage } from "./drawStage";
+import { loadBackgroundArt } from "./backgroundArt";
 import {
   loadCharacterSprites,
   WALK_LEGS_OFFSET_X_PX,
@@ -222,12 +223,25 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   // 마지막 수평 이동 방향 — 스프라이트가 원본은 오른쪽을 보고 있으므로 왼쪽 이동 시 좌우 반전한다.
   const facingRightRef = useRef(true);
   const [sprites, setSprites] = useState<CharacterSprites | null>(null);
+  const [backgrounds, setBackgrounds] = useState<Record<Round, HTMLImageElement | null> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     loadCharacterSprites()
       .then((loaded) => {
         if (!cancelled) setSprites(loaded);
+      })
+      .catch((error) => console.error(error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadBackgroundArt()
+      .then((loaded) => {
+        if (!cancelled) setBackgrounds(loaded);
       })
       .catch((error) => console.error(error));
     return () => {
@@ -377,7 +391,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const bodyPose: BodyPose = deathInfo ? deathInfo.current : selectBodyPose(margin, isMoving);
       const shadowExpression = selectShadowExpression(margin);
 
-      renderFrame(ctx, stage, sprites, {
+      renderFrame(ctx, stage, sprites, backgrounds?.[roundRef.current] ?? null, {
         characterPos: characterRef.current,
         shadowAngle: shadowAngleRef.current,
         bodyPose,
@@ -399,7 +413,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, backgrounds]);
 
   return (
     <>
@@ -640,7 +654,13 @@ function drawShadowSprite(
   ctx.restore();
 }
 
-function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: CharacterSprites, state: RenderState) {
+function renderFrame(
+  ctx: CanvasRenderingContext2D,
+  stage: Stage,
+  sprites: CharacterSprites,
+  background: HTMLImageElement | null,
+  state: RenderState,
+) {
   const {
     characterPos,
     shadowAngle,
@@ -677,7 +697,7 @@ function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: Chara
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
   ctx.translate(-camX, -camY);
 
-  drawStage(ctx, stage);
+  drawStage(ctx, stage, background);
 
   // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
   if (isGuideVisible(round)) {
