@@ -646,7 +646,28 @@ function drawRunDustEffect(ctx: CanvasRenderingContext2D, feetX: number, feetY: 
  * shadowAngle 방향으로 SHADOW_LENGTH만큼 떨어진 지점에 오도록 하고, 로컬
  * x(폭)는 그대로 둬 폭 축이 화면 수평을 유지한다(shadowTip 공식과 동일한
  * cos/sin 규약).
+ *
+ * x축(폭)을 항상 (1, 0)으로 고정하는 위 설계상, shadowAngle이 정확히 수평
+ * (0°/180°, sinθ≈0)이면 y축(높이) 기저벡터 (-stretch·cosθ, -stretch·sinθ)도
+ * 수평이 되어 두 축이 겹친다 — 즉 2D 이미지가 폭 0인 직선으로 찌그러져
+ * 화면에서 완전히 사라진다(브라우저 실측 검증 중 발견, 캔버스 픽셀 캡처로
+ * 재현). sinθ에 최소 크기(MIN_VERTICAL_RATIO)를 강제해 이 퇴화를 막는다 —
+ * 실제 각도가 아주 살짝 어긋나 보이는 대가로, 그림자가 항상 화면에 보이게
+ * 한다.
  */
+const MIN_VERTICAL_RATIO = 0.12;
+
+/**
+ * shadowAngle의 sin 성분에 최소 크기를 강제한다 — drawShadowSprite 주석 참고.
+ * sinθ가 0에 가까우면(수평 방향) 전단 변환의 y축 기저벡터가 x축과 겹쳐
+ * 그림자가 화면에서 완전히 사라지는 것을 막는다.
+ */
+export function shadowVerticalComponent(shadowAngle: number): number {
+  const sinTheta = Math.sin(shadowAngle);
+  const verticalSign = sinTheta < 0 ? -1 : 1;
+  return Math.abs(sinTheta) < MIN_VERTICAL_RATIO ? verticalSign * MIN_VERTICAL_RATIO : sinTheta;
+}
+
 function drawShadowSprite(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
@@ -665,10 +686,11 @@ function drawShadowSprite(
   // 피드백 — 가장자리를 블러로 부드럽게 풀어 윤곽선을 흐릿하게 만들고,
   // 완전한 검정에 가깝게 어둡혀 그림자다운 무게감을 준다.
   const tint = aligned ? "brightness(0)" : "brightness(0.4) sepia(1) hue-rotate(-50deg) saturate(5)";
+  const effectiveSin = shadowVerticalComponent(shadowAngle);
 
   ctx.save();
   ctx.translate(originX, originY);
-  ctx.transform(1, 0, -stretch * Math.cos(shadowAngle), -stretch * Math.sin(shadowAngle), 0, 0);
+  ctx.transform(1, 0, -stretch * Math.cos(shadowAngle), -stretch * effectiveSin, 0, 0);
   ctx.filter = `${tint} blur(2px)`;
   ctx.globalAlpha = 0.88;
   // drawBodySprite와 동일한 앵커(발=원점, 머리=-h 방향)를 그대로 재사용한다.
