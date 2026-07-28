@@ -44,6 +44,7 @@ describe("generateStage", () => {
     expect(a.checkpoints).toEqual(b.checkpoints);
     expect(a.lightSources).toEqual(b.lightSources);
     expect(Array.from(a.grid.cells)).toEqual(Array.from(b.grid.cells));
+    expect(Array.from(a.distanceField)).toEqual(Array.from(b.distanceField));
   });
 
   it("다른 시드는 다른 스테이지를 만든다", () => {
@@ -97,6 +98,35 @@ describe("generateStage", () => {
       expect(stage.checkpointPathIndices[i]).toBeGreaterThan(stage.checkpointPathIndices[i - 1]);
     }
   });
+
+  it("스폰 셀의 distanceField 값은 0이다", () => {
+    const stage = generateStage(DEFAULT_SEED);
+    const col = Math.floor(stage.spawn.x / stage.grid.tileSize);
+    const row = Math.floor(stage.spawn.y / stage.grid.tileSize);
+    expect(stage.distanceField[row * stage.grid.cols + col]).toBe(0);
+  });
+
+  it("checkpointProgress/goalProgress는 checkpoints/goal 좌표의 distanceField 값과 일치한다", () => {
+    const stage = generateStage(DEFAULT_SEED);
+    stage.checkpoints.forEach((checkpoint, i) => {
+      const col = Math.floor(checkpoint.x / stage.grid.tileSize);
+      const row = Math.floor(checkpoint.y / stage.grid.tileSize);
+      expect(stage.checkpointProgress[i]).toBe(stage.distanceField[row * stage.grid.cols + col]);
+    });
+    const goalCol = Math.floor(stage.goal.x / stage.grid.tileSize);
+    const goalRow = Math.floor(stage.goal.y / stage.grid.tileSize);
+    expect(stage.goalProgress).toBe(stage.distanceField[goalRow * stage.grid.cols + goalCol]);
+  });
+
+  it("checkpointProgress/goalProgress는 항상 0보다 크고 오름차순이다 — nearestPathIndex가 벽을 무시해 순서가 뒤바뀌던 문제의 재발 방지", () => {
+    const stage = generateStage(DEFAULT_SEED);
+    let previous = 0;
+    for (const progress of stage.checkpointProgress) {
+      expect(progress).toBeGreaterThan(previous);
+      previous = progress;
+    }
+    expect(stage.goalProgress).toBeGreaterThan(previous);
+  });
 });
 
 describe("seedForRound", () => {
@@ -142,6 +172,33 @@ describe("generateStage — 여러 시드 전수 검증 (라운드별 재생성 
         const stage = generateStage(seedForRound(base, round));
         expect(isReachable(stage.grid, stage.spawn, stage.goal)).toBe(true);
       }
+    }
+  });
+
+  it("1~200 시드 각각에서 path의 각 지점(carve 순서 인덱스 i)의 BFS 진행도는 i를 넘지 않는다", () => {
+    // carve 순서 경로 자체가 스폰→해당 셀까지의 유효한 i-스텝 걷기이므로, BFS
+    // 최단거리(distanceField)는 정의상 i 이하여야 한다 — nearestPathIndex가
+    // 벽을 무시해 이 불변조건 없이도 먼 인덱스를 "가깝다"고 오판하던 문제를
+    // distanceField 기반 판정이 구조적으로 막는지 실제 시드로 검증한다.
+    for (let seed = 1; seed <= 200; seed++) {
+      const stage = generateStage(seed);
+      stage.path.forEach((point, i) => {
+        const col = Math.floor(point.x / stage.grid.tileSize);
+        const row = Math.floor(point.y / stage.grid.tileSize);
+        expect(stage.distanceField[row * stage.grid.cols + col]).toBeLessThanOrEqual(i);
+      });
+    }
+  });
+
+  it("1~200 시드 각각에서 checkpointProgress/goalProgress가 항상 오름차순이다 (재시도 게이트 실측 검증)", () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const stage = generateStage(seed);
+      let previous = 0;
+      for (const progress of stage.checkpointProgress) {
+        expect(progress).toBeGreaterThan(previous);
+        previous = progress;
+      }
+      expect(stage.goalProgress).toBeGreaterThan(previous);
     }
   });
 });

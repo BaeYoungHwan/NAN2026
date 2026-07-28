@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
+import type { TileGrid } from "./stage";
 import {
   controlsReversed,
   effectiveAngleTolerance,
   isGuideVisible,
   isStageCleared,
   MAX_ROUND,
-  nearestPathIndex,
-  respawnIndexFor,
+  progressAt,
+  respawnPointFor,
   roundAfterClear,
 } from "./round";
 
-const checkpointPathIndices = [3, 6]; // 스테이지 내부 세이브 포인트 인덱스 (예: 경로 길이 9, 라운드 전환과 무관)
+const spawn = { x: 0, y: 0 };
+const checkpoints = [
+  { x: 30, y: 0 },
+  { x: 60, y: 0 },
+];
+const checkpointProgress = [3, 6]; // 스테이지 내부 세이브 포인트 진척도(BFS 거리) 값, 라운드 전환과 무관
 
 describe("isGuideVisible", () => {
   it("1R에서는 가이드라인을 표시한다", () => {
@@ -23,19 +29,19 @@ describe("isGuideVisible", () => {
   });
 });
 
-describe("nearestPathIndex", () => {
-  const path = [
-    { x: 0, y: 0 },
-    { x: 10, y: 0 },
-    { x: 20, y: 0 },
-  ];
+describe("progressAt", () => {
+  const grid: TileGrid = { cols: 3, rows: 1, tileSize: 40, cells: new Uint8Array([0, 0, 0]) };
+  const distanceField = new Int32Array([0, 1, 2]);
 
-  it("가장 가까운 path 점의 인덱스를 반환한다", () => {
-    expect(nearestPathIndex(path, { x: 9, y: 1 })).toBe(1);
+  it("캐릭터가 서 있는 셀의 distanceField 값을 반환한다", () => {
+    expect(progressAt(grid, distanceField, { x: 5, y: 10 })).toBe(0);
+    expect(progressAt(grid, distanceField, { x: 45, y: 10 })).toBe(1);
+    expect(progressAt(grid, distanceField, { x: 85, y: 10 })).toBe(2);
   });
 
-  it("정확히 겹치는 점이 있으면 그 인덱스를 반환한다", () => {
-    expect(nearestPathIndex(path, { x: 20, y: 0 })).toBe(2);
+  it("미도달(-1) 셀은 방어적으로 0을 반환한다", () => {
+    const withUnreached = new Int32Array([0, -1, 2]);
+    expect(progressAt(grid, withUnreached, { x: 45, y: 10 })).toBe(0);
   });
 });
 
@@ -53,29 +59,29 @@ describe("roundAfterClear", () => {
   });
 });
 
-describe("respawnIndexFor", () => {
-  it("어떤 체크포인트도 못 넘었으면 스폰(0)으로 스냅한다", () => {
-    expect(respawnIndexFor(0, checkpointPathIndices)).toBe(0);
-    expect(respawnIndexFor(2, checkpointPathIndices)).toBe(0);
+describe("respawnPointFor", () => {
+  it("어떤 체크포인트도 못 넘었으면 스폰으로 스냅한다", () => {
+    expect(respawnPointFor(0, spawn, checkpoints, checkpointProgress)).toEqual(spawn);
+    expect(respawnPointFor(2, spawn, checkpoints, checkpointProgress)).toEqual(spawn);
   });
 
   it("체크포인트를 넘은 뒤 그 사이 아무 지점에서 죽어도 마지막으로 넘은 체크포인트로 스냅한다 (죽은 자리 그대로 재개하지 않음)", () => {
-    expect(respawnIndexFor(3, checkpointPathIndices)).toBe(3);
-    expect(respawnIndexFor(5, checkpointPathIndices)).toBe(3);
+    expect(respawnPointFor(3, spawn, checkpoints, checkpointProgress)).toEqual(checkpoints[0]);
+    expect(respawnPointFor(5, spawn, checkpoints, checkpointProgress)).toEqual(checkpoints[0]);
   });
 
   it("두 번째 체크포인트를 넘었으면 그 지점으로 스냅한다", () => {
-    expect(respawnIndexFor(6, checkpointPathIndices)).toBe(6);
-    expect(respawnIndexFor(100, checkpointPathIndices)).toBe(6);
+    expect(respawnPointFor(6, spawn, checkpoints, checkpointProgress)).toEqual(checkpoints[1]);
+    expect(respawnPointFor(100, spawn, checkpoints, checkpointProgress)).toEqual(checkpoints[1]);
   });
 });
 
 describe("isStageCleared", () => {
-  it("path의 마지막 인덱스에 도달하지 못했으면 false다", () => {
+  it("골의 진척도(goalProgress)에 도달하지 못했으면 false다", () => {
     expect(isStageCleared(7, 8)).toBe(false);
   });
 
-  it("path의 마지막 인덱스 이상이면 true다", () => {
+  it("골의 진척도 이상이면 true다", () => {
     expect(isStageCleared(8, 8)).toBe(true);
     expect(isStageCleared(9, 8)).toBe(true);
   });

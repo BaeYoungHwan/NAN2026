@@ -7,8 +7,8 @@ import {
   effectiveAngleTolerance,
   isGuideVisible,
   isStageCleared,
-  nearestPathIndex,
-  respawnIndexFor,
+  progressAt,
+  respawnPointFor,
   roundAfterClear,
   type Round,
 } from "../core/round";
@@ -202,15 +202,16 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const deathCountRef = useRef(0);
   const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
-  // 이 라운드 스테이지 안에서 가장 멀리 도달한 path 인덱스(진척도) — 단조증가,
-  // 사망해도 줄지 않는다. 라운드 전환(스테이지 자체가 새로 생성되는 것)과는
-  // 별개로, "이 스테이지의 세이브 포인트를 지나쳤는지"만 이 값으로 판정한다
-  // (`respawnIndexFor`) — 정확히 밟지 않고 지나치기만 해도 인정된다. 사망
-  // 리스폰 지점은 이 값을 그대로 쓰지 않고 `respawnIndexFor`로 마지막
-  // 체크포인트에 스냅한다 — 그대로 쓰면 "죽은 자리에서 그대로 재개"가 되어
-  // 사망 페널티가 없어진다(실제로 겪은 버그, `respawnIndexFor` 주석 참고).
-  // 라운드가 전환되면(다음 스테이지로 교체) `loadStage`가 0으로 리셋한다.
-  const farthestIndexRef = useRef(0);
+  // 이 라운드 스테이지 안에서 가장 멀리 도달한 진척도(스폰 기준 BFS 통로 거리,
+  // `progressAt`) — 단조증가, 사망해도 줄지 않는다. 라운드 전환(스테이지
+  // 자체가 새로 생성되는 것)과는 별개로, "이 스테이지의 세이브 포인트를
+  // 지나쳤는지"만 이 값으로 판정한다(`respawnPointFor`) — 정확히 밟지 않고
+  // 지나치기만 해도 인정된다. 사망 리스폰 지점은 이 값을 그대로 쓰지 않고
+  // `respawnPointFor`로 마지막 체크포인트에 스냅한다 — 그대로 쓰면 "죽은
+  // 자리에서 그대로 재개"가 되어 사망 페널티가 없어진다(실제로 겪은 버그,
+  // `respawnPointFor` 주석 참고). 라운드가 전환되면(다음 스테이지로 교체)
+  // `loadStage`가 0으로 리셋한다.
+  const farthestProgressRef = useRef(0);
   // 직전 프레임의 최근접(활성) 광원 — 바뀌는 순간을 감지해 판정 유예를 주기 위함 (ADR-004).
   const activeLightRef = useRef<Point>(nearestLight(stageRef.current.lightSources, stageRef.current.spawn));
   // 광원 전환 유예 남은 시간(초) — 0보다 크면 이번 프레임 정렬 판정을 건너뛴다.
@@ -255,7 +256,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     stageRef.current = nextStage;
     characterRef.current = { ...nextStage.spawn };
     shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
-    farthestIndexRef.current = 0;
+    farthestProgressRef.current = 0;
     activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
     lightSwitchGraceRef.current = 0;
     dyingRef.current = false;
@@ -299,10 +300,14 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
       if (dyingRef.current) {
         if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
-          // 리스폰은 farthestIndexRef(현재 위치 기준 진척도)가 아니라 마지막으로
+          // 리스폰은 farthestProgressRef(현재 위치 기준 진척도)가 아니라 마지막으로
           // 넘은 체크포인트로 스냅한다 — 그대로 쓰면 사망 페널티가 없어진다(위 함수 설명 참고).
-          const respawnIndex = respawnIndexFor(farthestIndexRef.current, stage.checkpointPathIndices);
-          const respawnPoint = stage.path[respawnIndex];
+          const respawnPoint = respawnPointFor(
+            farthestProgressRef.current,
+            stage.spawn,
+            stage.checkpoints,
+            stage.checkpointProgress,
+          );
           characterRef.current = { ...respawnPoint };
           shadowAngleRef.current = naturalAngle(stage.lightSources, respawnPoint);
           // 리스폰으로 위치가 세이브 포인트로 튀는 것 자체가 "광원이 바뀐 것"처럼
@@ -345,26 +350,28 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           activeLightRef.current = currentActiveLight;
         }
 
-        // 진척도(가장 멀리 도달한 path 인덱스)를 먼저 갱신한다 — 이 스테이지(라운드)
-        // 안의 세이브 포인트 판정이 전부 이 값 기준이다. 체크포인트 원을 정확히
-        // 밟았는지가 아니라 "그 지점을 지나쳤는지"로 판정하므로, 2칸 폭 통로 안에서
-        // 체크포인트 중심선을 살짝 비껴가도 진행한 만큼은 인정된다. farthestIndexRef는
-        // 단조증가라 사망 리스폰(위 dyingRef 분기)도 되돌아가지 않는다.
-        const previousFarthest = farthestIndexRef.current;
-        const currentIndex = nearestPathIndex(stage.path, characterRef.current);
-        if (currentIndex > farthestIndexRef.current) {
-          farthestIndexRef.current = currentIndex;
+        // 진척도(스폰 기준 BFS 통로 거리, `progressAt`)를 먼저 갱신한다 — 이
+        // 스테이지(라운드) 안의 세이브 포인트 판정이 전부 이 값 기준이다.
+        // 벽을 고려한 그래프 거리라, 캐릭터가 있는 셀 자체의 진행 거리만
+        // 인정되고 벽 건너편의 공간적으로 가까운 지점으로는 튀지 않는다(이전
+        // 유클리드 최근접 방식의 문제 — ADR-003 "버그 수정 기록" 참고).
+        // farthestProgressRef는 단조증가라 사망 리스폰(위 dyingRef 분기)도
+        // 되돌아가지 않는다.
+        const previousFarthest = farthestProgressRef.current;
+        const currentProgress = progressAt(stage.grid, stage.distanceField, characterRef.current);
+        if (currentProgress > farthestProgressRef.current) {
+          farthestProgressRef.current = currentProgress;
         }
 
         // 이 스테이지 안의 세이브 포인트를 이번 프레임에 새로 지나쳤는지 — 라운드
         // 전환과는 별개로, 광원 전환 경계선과 체크포인트 근방이 우연히 겹칠 때
         // (ADR-004) 정렬 판정을 스킵해 불공정한 사망을 막기 위한 용도다.
-        const justPassedSavePoint = stage.checkpointPathIndices.some(
-          (idx) => previousFarthest < idx && farthestIndexRef.current >= idx,
+        const justPassedSavePoint = stage.checkpointProgress.some(
+          (progress) => previousFarthest < progress && farthestProgressRef.current >= progress,
         );
-        // 이 라운드 스테이지의 골(마지막 path 인덱스)에 도달했는지 — 도달하면
+        // 이 라운드 스테이지의 골(goalProgress)에 도달했는지 — 도달하면
         // 다음 라운드용 새 스테이지로 전환하거나(마지막 라운드면) 전체 클리어된다.
-        const justCleared = !clearedRef.current && isStageCleared(farthestIndexRef.current, stage.path.length - 1);
+        const justCleared = !clearedRef.current && isStageCleared(farthestProgressRef.current, stage.goalProgress);
 
         // 세이브 포인트 통과/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 그
         // 프레임에 정렬이 깨져도 "진행했다"는 사실은 항상 인정되어야 한다(스킵).
