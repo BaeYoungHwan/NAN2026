@@ -34,18 +34,6 @@ export function drawStage(ctx: CanvasRenderingContext2D, stage: Stage, backgroun
     }
   }
 
-  // 이동 패턴 학습 AI가 막은 셀 — 일반 벽과 구분되도록 보라색으로 덧칠
-  ctx.fillStyle = "rgba(156, 74, 156, 0.65)";
-  ctx.strokeStyle = "rgba(220, 160, 220, 0.45)";
-  for (const cell of stage.aiBlockedCells) {
-    const col = Math.floor(cell.x / grid.tileSize);
-    const row = Math.floor(cell.y / grid.tileSize);
-    const x = col * grid.tileSize;
-    const y = row * grid.tileSize;
-    ctx.fillRect(x, y, grid.tileSize, grid.tileSize);
-    ctx.strokeRect(x, y, grid.tileSize, grid.tileSize);
-  }
-
   ctx.shadowColor = "rgba(74, 144, 217, 0.9)";
   ctx.shadowBlur = 12;
   ctx.fillStyle = "#4a90d9";

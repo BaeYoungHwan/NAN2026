@@ -28,7 +28,7 @@ function App() {
 
   const handleRoundChange = useCallback((nextRound: Round, stageCleared: boolean) => {
     setRound(nextRound);
-    // advanceRound()는 1R로 되돌아가지 않으므로 nextRound는 항상 2R 또는 3R이다.
+    // onRoundChange는 라운드가 실제로 승급/클리어된 프레임에만 호출되므로 nextRound는 항상 2R 또는 3R이다.
     if (nextRound !== 1) {
       if (stageCleared) {
         setShowEnding(true);

@@ -3,11 +3,13 @@ import type { CSSProperties } from "react";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
 import {
-  advanceRound,
   controlsReversed,
   effectiveAngleTolerance,
   isGuideVisible,
-  roundTarget,
+  isStageCleared,
+  nearestPathIndex,
+  respawnIndexFor,
+  roundAfterClear,
   type Round,
 } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/character";
@@ -23,8 +25,8 @@ import {
   SAFE_ANGLE_TOLERANCE,
   SHADOW_LENGTH,
   generateStage,
+  seedForRound,
 } from "../procgen/stageGenerator";
-import { applyLearning, cellKey, MAX_AI_BLOCKS } from "../ai/pathBlocker";
 import { drawStage } from "./drawStage";
 import { loadBackgroundArt } from "./backgroundArt";
 import {
@@ -39,7 +41,6 @@ import {
 } from "./characterSprites";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
-const TARGET_RADIUS = 40; // 세이브 포인트·골 도달 판정 반경(px)
 const DEATH_ANIM_MS = 1600; // 사망 시 4단계 애니메이션을 보여주는 동안 멈추는 시간
 const BODY_DISPLAY_HEIGHT = 42; // 충돌 판정(CHARACTER_RADIUS)과 무관한 순수 표시 크기
 const CAMERA_ZOOM = 2.2; // 캐릭터를 따라다니며 확대하는 배율 — 맵 전체 대신 주변만 크게 보여준다
@@ -170,22 +171,18 @@ interface GameCanvasProps {
  * - 그림자는 , . 로 직접 회전 (광원 위치와 무관, 자동 복귀 없음)
  * - 안전 구역(캐릭터 뒤, 광원 반대 방향 ± 허용각)은 광원-캐릭터 위치로 매 프레임 재계산됨
  * - 그림자 각도가 안전 구역을 벗어나면 사망 시퀀스(4단계 애니메이션, 약 1.6초) 후
- *   마지막 세이브 포인트로 리셋
- * - 하나의 스테이지(같은 통로)를 세이브 포인트로 구간을 나눠 1R→2R→3R 순서로
- *   이어서 진행한다. 세이브 포인트 통과 시 캐릭터 위치는 그대로 두고 다음
- *   라운드로 즉시 전환하며(텔레포트 없음), 그 지점이 새 리스폰 기준이 된다.
- *   마지막 라운드에서 최종 골 도달 시 스테이지 전체 클리어. 1R은 안전 구역
+ *   이 라운드 스테이지 안의 마지막 세이브 포인트(없으면 스폰)로 리셋
+ * - 1R→2R→3R은 각각 독립적으로 생성된 별도 스테이지다(`seedForRound`로 베이스
+ *   시드에서 결정론적으로 파생) — 한 라운드의 골에 도달하면 다음 라운드용 새
+ *   스테이지를 그 자리에서 생성해 전환한다(`loadStage`). 마지막 라운드(3R)에서
+ *   골에 도달하면 스테이지 교체 없이 전체 클리어로 처리한다. 1R은 안전 구역
  *   가이드라인(부채꼴)을 보여주고, 2R부터는 가이드라인을 숨긴다(그림자 색상
  *   피드백은 유지). 3R 디메리트: 허용 각도 축소 + WASD 이동키 상하좌우
  *   반전(그림자 회전키는 영향 없음) — PRD §7-1.
  * - 캐릭터 몸 포즈·그림자 표정은 alignmentMargin(위험도) 기준으로 함께 전환된다 — PRD §7-2.
- * - 이동 패턴 학습 AI(단순 빈도 기반, PRD §12): 캐릭터가 새 셀에 들어갈 때마다
- *   방문 횟수를 누적하고, 재시작 시 가장 자주 지나간 셀 중 스테이지를 풀 수
- *   없게 만들지 않는 셀만 골라 벽으로 추가한다(`src/ai/pathBlocker.ts`). 학습은
- *   세션 내에서만 누적되며(새로고침 시 초기화), 라운드/사망 리셋에는 영향 없음.
  *
- * 스테이지는 리액트 상태가 아니라 `stageRef`로 들고 있다 — 재시작마다 스테이지
- * 객체 자체가 바뀌는데(학습 반영), 게임 루프(rAF)가 그 시점에 아직 안 바뀐
+ * 스테이지는 리액트 상태가 아니라 `stageRef`로 들고 있다 — 라운드 전환·재시작마다
+ * 스테이지 객체 자체가 통째로 바뀌는데, 게임 루프(rAF)가 그 시점에 아직 안 바뀐
  * 클로저를 참조해 한두 프레임 옛 스테이지로 렌더링되는 걸 막기 위함이다.
  * 렌더링에 굳이 리액트 리렌더가 필요 없으므로(캔버스 하나만 그리는 구조) 상태로
  * 둘 이유가 없다.
@@ -205,16 +202,19 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const deathCountRef = useRef(0);
   const roundRef = useRef<Round>(1);
   const clearedRef = useRef(false);
-  // 마지막으로 통과한 세이브 포인트 — 사망 시 이 지점으로 리스폰한다(스폰 지점 아님).
-  const savePointRef = useRef<Point>({ ...stageRef.current.spawn });
+  // 이 라운드 스테이지 안에서 가장 멀리 도달한 path 인덱스(진척도) — 단조증가,
+  // 사망해도 줄지 않는다. 라운드 전환(스테이지 자체가 새로 생성되는 것)과는
+  // 별개로, "이 스테이지의 세이브 포인트를 지나쳤는지"만 이 값으로 판정한다
+  // (`respawnIndexFor`) — 정확히 밟지 않고 지나치기만 해도 인정된다. 사망
+  // 리스폰 지점은 이 값을 그대로 쓰지 않고 `respawnIndexFor`로 마지막
+  // 체크포인트에 스냅한다 — 그대로 쓰면 "죽은 자리에서 그대로 재개"가 되어
+  // 사망 페널티가 없어진다(실제로 겪은 버그, `respawnIndexFor` 주석 참고).
+  // 라운드가 전환되면(다음 스테이지로 교체) `loadStage`가 0으로 리셋한다.
+  const farthestIndexRef = useRef(0);
   // 직전 프레임의 최근접(활성) 광원 — 바뀌는 순간을 감지해 판정 유예를 주기 위함 (ADR-004).
   const activeLightRef = useRef<Point>(nearestLight(stageRef.current.lightSources, stageRef.current.spawn));
   // 광원 전환 유예 남은 시간(초) — 0보다 크면 이번 프레임 정렬 판정을 건너뛴다.
   const lightSwitchGraceRef = useRef(0);
-  // 이동 패턴 학습 AI — 캐릭터가 지나간 셀 방문 횟수. 세션 내내 누적(재시작해도 초기화 안 함).
-  const visitCountsRef = useRef(new Map<string, number>());
-  // 방문 카운트를 "셀에 들어간 순간"에만 올리기 위한 직전 셀 키(가만히 서 있는 시간은 세지 않음).
-  const lastVisitedCellKeyRef = useRef<string | null>(null);
   // stage 참조가 바뀔 때만(=재시작 시) 충돌판정 함수를 새로 만든다 — 매 프레임 재생성 방지.
   const colliderCacheRef = useRef<{ stage: Stage; canOccupy: (point: Point) => boolean } | null>(null);
   // 사망 시퀀스 진행 상태 — true인 동안 게임플레이가 멈추고 죽음 모션이 재생된다.
@@ -249,23 +249,25 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     };
   }, []);
 
+  // 새 스테이지를 로드할 때 재설정해야 하는 상태를 한곳에 모은다 — 수동 재시작(1R부터)과
+  // 라운드 전환(다음 라운드 스테이지로) 양쪽이 공유한다.
+  function loadStage(nextStage: Stage) {
+    stageRef.current = nextStage;
+    characterRef.current = { ...nextStage.spawn };
+    shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
+    farthestIndexRef.current = 0;
+    activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
+    lightSwitchGraceRef.current = 0;
+    dyingRef.current = false;
+    facingRightRef.current = true;
+  }
+
   useImperativeHandle(
     ref,
     () => ({
       restart: () => {
-        const previousStage = stageRef.current;
-        const nextStage = applyLearning(DEFAULT_SEED, previousStage, visitCountsRef.current, MAX_AI_BLOCKS);
-
-        stageRef.current = nextStage;
-        characterRef.current = { ...nextStage.spawn };
-        shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
-        savePointRef.current = { ...nextStage.spawn };
-        activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
-        lightSwitchGraceRef.current = 0;
+        loadStage(generateStage(DEFAULT_SEED));
         roundRef.current = 1;
-        lastVisitedCellKeyRef.current = null;
-        dyingRef.current = false;
-        facingRightRef.current = true;
         onRoundChange?.(1, false);
         clearedRef.current = false;
       },
@@ -286,7 +288,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     const draw = (time: number) => {
       const deltaSeconds = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
-      const stage = stageRef.current;
+      let stage = stageRef.current; // let: 라운드 전환 시 이 프레임 안에서 재할당된다(아래 참고)
 
       // 죽음 시퀀스·대사창·클리어 중에는 실제 게임플레이가 멈춰있으므로, 이
       // 시점에 물리적으로 눌려있는 방향키가 그대로 반영돼 캐릭터 방향이 바뀌거나
@@ -297,11 +299,15 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
       if (dyingRef.current) {
         if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
-          characterRef.current = { ...savePointRef.current };
-          shadowAngleRef.current = naturalAngle(stage.lightSources, savePointRef.current);
+          // 리스폰은 farthestIndexRef(현재 위치 기준 진척도)가 아니라 마지막으로
+          // 넘은 체크포인트로 스냅한다 — 그대로 쓰면 사망 페널티가 없어진다(위 함수 설명 참고).
+          const respawnIndex = respawnIndexFor(farthestIndexRef.current, stage.checkpointPathIndices);
+          const respawnPoint = stage.path[respawnIndex];
+          characterRef.current = { ...respawnPoint };
+          shadowAngleRef.current = naturalAngle(stage.lightSources, respawnPoint);
           // 리스폰으로 위치가 세이브 포인트로 튀는 것 자체가 "광원이 바뀐 것"처럼
           // 감지되어 유예가 걸리는 걸 막기 위해, 활성 광원 기준점도 같이 갱신한다.
-          activeLightRef.current = nearestLight(stage.lightSources, savePointRef.current);
+          activeLightRef.current = nearestLight(stage.lightSources, respawnPoint);
           // 죽기 직전 이동 방향이 남아있으면, 리스폰 직후 실제 이동 방향과 무관하게
           // 죽던 순간 보고 있던 방향을 그대로 유지해 버려서 캐릭터가 엉뚱한 쪽을
           // 보며 달리는 것처럼 보인다 — 리스폰 시 기본 방향(오른쪽)으로 되돌린다.
@@ -322,12 +328,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         else if (moveInput.left) facingRightRef.current = false;
         isMoving = moveInput.up || moveInput.down || moveInput.left || moveInput.right;
 
-        const visitKey = cellKey(stage.grid, characterRef.current);
-        if (visitKey !== lastVisitedCellKeyRef.current) {
-          visitCountsRef.current.set(visitKey, (visitCountsRef.current.get(visitKey) ?? 0) + 1);
-          lastVisitedCellKeyRef.current = visitKey;
-        }
-
         if (inputRef.current.rotateCW) {
           shadowAngleRef.current += ROTATION_SPEED * deltaSeconds;
         }
@@ -345,24 +345,46 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           activeLightRef.current = currentActiveLight;
         }
 
-        // 체크포인트/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 광원 전환
-        // 경계선이 체크포인트 포착 반경과 우연히 겹치면(ADR-004), 도달하는 바로
-        // 그 프레임에 정렬이 깨질 수 있는데, 그 경우에도 "닿았다"는 사실은
-        // 항상 인정되어야 한다(도달 프레임엔 정렬 판정을 건너뜀). 그 외
-        // 구간에서는 기존과 동일하게 매 프레임 정렬을 검사한다.
-        const target = roundTarget(roundRef.current, stage.checkpoints, stage.goal);
-        const distanceToTarget = Math.hypot(characterRef.current.x - target.x, characterRef.current.y - target.y);
-        const reachedTarget = distanceToTarget <= TARGET_RADIUS;
+        // 진척도(가장 멀리 도달한 path 인덱스)를 먼저 갱신한다 — 이 스테이지(라운드)
+        // 안의 세이브 포인트 판정이 전부 이 값 기준이다. 체크포인트 원을 정확히
+        // 밟았는지가 아니라 "그 지점을 지나쳤는지"로 판정하므로, 2칸 폭 통로 안에서
+        // 체크포인트 중심선을 살짝 비껴가도 진행한 만큼은 인정된다. farthestIndexRef는
+        // 단조증가라 사망 리스폰(위 dyingRef 분기)도 되돌아가지 않는다.
+        const previousFarthest = farthestIndexRef.current;
+        const currentIndex = nearestPathIndex(stage.path, characterRef.current);
+        if (currentIndex > farthestIndexRef.current) {
+          farthestIndexRef.current = currentIndex;
+        }
 
-        if (reachedTarget) {
-          const { round, stageCleared } = advanceRound(roundRef.current);
-          if (stageCleared) {
-            clearedRef.current = true;
-          } else {
-            savePointRef.current = { ...target };
+        // 이 스테이지 안의 세이브 포인트를 이번 프레임에 새로 지나쳤는지 — 라운드
+        // 전환과는 별개로, 광원 전환 경계선과 체크포인트 근방이 우연히 겹칠 때
+        // (ADR-004) 정렬 판정을 스킵해 불공정한 사망을 막기 위한 용도다.
+        const justPassedSavePoint = stage.checkpointPathIndices.some(
+          (idx) => previousFarthest < idx && farthestIndexRef.current >= idx,
+        );
+        // 이 라운드 스테이지의 골(마지막 path 인덱스)에 도달했는지 — 도달하면
+        // 다음 라운드용 새 스테이지로 전환하거나(마지막 라운드면) 전체 클리어된다.
+        const justCleared = !clearedRef.current && isStageCleared(farthestIndexRef.current, stage.path.length - 1);
+
+        // 세이브 포인트 통과/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 그
+        // 프레임에 정렬이 깨져도 "진행했다"는 사실은 항상 인정되어야 한다(스킵).
+        // 그 외 구간에서는 기존과 동일하게 매 프레임 정렬을 검사한다.
+        if (justPassedSavePoint || justCleared) {
+          if (justCleared) {
+            const { round: nextRound, cleared } = roundAfterClear(roundRef.current);
+            if (cleared) {
+              // 마지막 라운드(3R) 골 도달 = 전체 클리어 — 스테이지 교체 없이 그대로 둔다.
+              clearedRef.current = true;
+              onRoundChange?.(roundRef.current, true);
+            } else {
+              const nextStage = generateStage(seedForRound(DEFAULT_SEED, nextRound));
+              loadStage(nextStage);
+              stage = nextStage; // ★ 이번 프레임 렌더가 새 스테이지를 참조하도록 재할당(위 let 참고)
+              roundRef.current = nextRound;
+              onRoundChange?.(nextRound, false);
+            }
           }
-          roundRef.current = round;
-          onRoundChange?.(round, stageCleared);
+          // justPassedSavePoint만 true인 경우는 라운드 변화 없이 이번 프레임 정렬 판정만 스킵한다.
         } else {
           const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
           const natural = naturalAngle(stage.lightSources, characterRef.current);
