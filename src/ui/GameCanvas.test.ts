@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deathFrameInfo, selectBodyPose, selectShadowExpression } from "./GameCanvas";
+import { deathFrameInfo, selectBodyPose, selectShadowExpression, shadowVerticalComponent } from "./GameCanvas";
 
 describe("selectBodyPose", () => {
   it("이동 중이면 위험도와 무관하게 항상 walk를 반환한다", () => {
@@ -47,6 +47,29 @@ describe("selectShadowExpression", () => {
       if (bodyPose === "flinch") expect(shadowExpression).toBe("surprised");
       if (bodyPose === "danger") expect(shadowExpression).toBe("scared");
     }
+  });
+});
+
+describe("shadowVerticalComponent", () => {
+  it("각도가 정확히 수평(0, π)이어도 0을 반환하지 않는다 — drawShadowSprite 전단 변환 퇴화 방지", () => {
+    expect(shadowVerticalComponent(0)).not.toBe(0);
+    expect(shadowVerticalComponent(Math.PI)).not.toBe(0);
+    expect(Math.abs(shadowVerticalComponent(0))).toBeGreaterThan(0);
+  });
+
+  it("수평에 가까운 각도에서도 최소 크기 이상을 유지한다", () => {
+    const nearHorizontal = 0.001;
+    expect(Math.abs(shadowVerticalComponent(nearHorizontal))).toBeGreaterThanOrEqual(0.12);
+  });
+
+  it("이미 충분히 수직 성분이 큰 각도에서는 Math.sin과 동일한 값을 그대로 반환한다", () => {
+    expect(shadowVerticalComponent(Math.PI / 2)).toBeCloseTo(1);
+    expect(shadowVerticalComponent(-Math.PI / 2)).toBeCloseTo(-1);
+  });
+
+  it("원래 sinθ의 부호를 보존한다", () => {
+    expect(shadowVerticalComponent(-0.001)).toBeLessThan(0);
+    expect(shadowVerticalComponent(0.001)).toBeGreaterThan(0);
   });
 });
 

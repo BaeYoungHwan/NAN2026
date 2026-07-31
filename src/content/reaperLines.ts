@@ -16,7 +16,7 @@ export const DEATH_LINES: readonly string[] = [
   "그림자가 삐끗하면 바로 저 세상입니다. 다시 한번!",
 ];
 
-/** advanceRound()가 실제로 반환하는 라운드(2R, 3R)에만 대응한다 — 1R로는 절대 진행되지 않는다. */
+/** 라운드가 승급될 때 실제로 전달되는 값(2R, 3R)에만 대응한다 — 1R로는 절대 진행되지 않는다. */
 export const ROUND_ADVANCE_LINES: Readonly<Record<2 | 3, string>> = {
   2: "오, 2라운드! 이제부터는 안전 구역 표시를 안 해드려요. 알아서 잘 맞춰보세요.",
   3: "마지막 3라운드입니다. 이제부터 조금 방해가 들어갈 거예요. 저도 어쩔 수 없어요...",

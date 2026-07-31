@@ -27,16 +27,38 @@ export interface Stage {
   grid: TileGrid;
   spawn: Point;
   /**
-   * 라운드 전환 세이브 포인트 — 통과하면 해당 라운드가 끝나고 다음 라운드로 즉시
-   * 전환된다(스폰으로 되돌아가지 않음). 이후 사망 시 리스폰 지점도 이 지점으로
-   * 바뀐다. 배열 순서가 라운드 순서(1R→2R 전환점, 2R→3R 전환점, ...)와 같다.
+   * 이 스테이지(=한 라운드) 내부의 세이브 포인트(시각 표시용) — 사망 시 리스폰
+   * 기준이 된다(`core/round.ts`의 `respawnPointFor`). 라운드 전환(다음 라운드용
+   * 새 스테이지로 교체)과는 무관한, 스테이지 내부 개념이다.
    */
   checkpoints: Point[];
+  /**
+   * 체크포인트가 `path` 위에서 위치한 인덱스 — `checkpoints`와 순서·길이가 같다.
+   * carve 순서 기반 체크포인트 "배치"(`procgen/stageGenerator.ts`의
+   * `computeCheckpointIndices`)에만 쓰인다 — 런타임 진척도 판정은 더 이상 이
+   * 인덱스를 쓰지 않고 `checkpointProgress`(벽을 고려한 BFS 거리)를 쓴다.
+   */
+  checkpointPathIndices: number[];
+  /** 이 라운드 스테이지의 최종 목표 — 도달하면 다음 라운드용 새 스테이지로 전환되거나(마지막 라운드면) 전체 클리어된다. */
   goal: Point;
   /**
-   * 이동 패턴 학습 AI가 자주 다닌 경로를 학습해 추가로 막은 셀 — 일반 벽과 달리
-   * 렌더링에서 구분 표시한다(어떤 벽이 "AI가 막은 것"인지 플레이어가 알 수 있게).
-   * `generateStage`의 `extraWalls` 인자로 넘긴 셀들이 그대로 담긴다.
+   * 스폰(index 0)부터 골(마지막 index)까지, carve된 순서 그대로의 통로 중심점
+   * 목록 — 체크포인트 "배치"(`computeCheckpointIndices`)의 기준 데이터다. 런타임
+   * 진척도 판정에는 쓰이지 않는다(`nearestPathIndex`가 벽을 무시해 벽 건너편의
+   * 공간적으로 가까운 인덱스를 오판하는 문제가 있어 `distanceField` 기반으로
+   * 교체됨 — ADR-003 "버그 수정 기록" 참고).
    */
-  aiBlockedCells: Point[];
+  path: Point[];
+  /**
+   * 스폰 기준 각 walkable 셀까지의 BFS 최단거리(스텝 수) — `row*cols+col` 인덱스,
+   * 미도달 셀은 -1(`procgen/reachability.ts`의 `bfsDistances`). 유클리드 거리와
+   * 달리 벽을 넘어갈 수 없으므로, 이 값을 진척도로 쓰면(`core/round.ts`의
+   * `progressAt`) 벽 건너편의 가까운 지점으로 진행도가 잘못 튀는 일이 구조적으로
+   * 불가능하다.
+   */
+  distanceField: Int32Array;
+  /** 각 `checkpoints[i]`의 `distanceField` 값 — 세이브 포인트 통과 판정 기준(오름차순 보장, `generateStage` 재시도 게이트 참고). */
+  checkpointProgress: number[];
+  /** `goal`의 `distanceField` 값 — 라운드(스테이지) 클리어 판정 기준. */
+  goalProgress: number;
 }

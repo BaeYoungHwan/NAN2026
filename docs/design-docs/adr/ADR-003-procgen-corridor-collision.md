@@ -53,3 +53,37 @@
 - 여러 스테이지 연속 진행(클리어 후 다음 스테이지 전환) 구현 시 시드 관리 전략 재검토 필요
 - 라운드 시스템(1R~3R)이 스테이지 재생성과 연동되어야 한다면(예: 라운드마다 새 시드) 이 ADR의 "단일 스테이지" 가정 재검토 필요
 - 장애물의 그림자 occlusion을 추가하게 되면 grid와 shadow 도메인 간 새로운 연동 지점이 필요함
+
+## 재검토 조건 해소 기록 (2026-07-28)
+
+위 두 조건이 실제로 트리거되어 "단일 스테이지" 가정을 폐기했다 — `Stage`는 이제 "한 라운드 전체"를 의미하고, 라운드 전환은 곧 새 `Stage` 생성이다.
+
+- **시드 관리**: `procgen/stageGenerator.ts`에 `seedForRound(baseSeed, round)` 추가. 내부 재시도용 `deriveSeed`와는 별도의 변환(`deriveRoundSeed`)을 쓴다 — 같은 함수를 재시도와 라운드 파생 양쪽에 쓰면 `generateStage(base)`가 내부 재시도로 우연히 `deriveSeed(base)`를 채택했을 때 2R 시드와 정확히 충돌해 1R=2R이 되는 문제가 실측으로 발견됐다. `seedForRound(base, 1) === base`라 기존 `generateStage(DEFAULT_SEED)` 호출부(1R)와 호환된다.
+- **라운드-스테이지 재생성 연동**: 한 라운드의 골 도달 시(`isStageCleared`) `core/round.ts`의 `roundAfterClear`로 다음 라운드 여부/전체 클리어 여부를 결정하고, 다음 라운드면 `generateStage(seedForRound(...))`로 완전히 새 스테이지를 생성해 전환한다(`ui/GameCanvas.tsx`의 `loadStage`). 체크포인트(`checkpointPathIndices`)·진척도 리스폰(`respawnIndexFor`) 로직은 폐기하지 않고 "이 라운드 스테이지 내부" 세이브 포인트 용도로 그대로 유지한다 — 라운드 전환(스테이지 교체)과 스테이지 내부 세이브 포인트는 서로 다른 개념으로 명확히 분리했다.
+- 부수적으로, 넓은 시드 sweep 테스트 중 체크포인트가 스폰/서로 다른 체크포인트와 좌표가 겹치는 드문 경우(막다른 통로에서 재방문된 셀이 체크포인트 인덱스와 겹침)가 발견되어, `generateStage`의 재시도 게이트에 "스폰/체크포인트/골이 모두 서로 다른 좌표인지" 조건을 추가했다(`hasDistinctCells`).
+
+## 버그 수정 기록 (2026-07-28): 진척도 판정이 유클리드 최근접이라 벽을 무시하던 문제
+
+`core/round.ts`의 `nearestPathIndex`는 캐릭터 위치에서 `stage.path`(carve 순서 통로 중심점)
+중 유클리드 거리로 가장 가까운 인덱스를 진척도로 썼다. `carveCorridor`가 좁은 20×15 그리드
+안에서 자기 자신 근처를 지나가는 경우가 흔해(300시드 전수 실측), 캐릭터가 통로 초반부에
+있어도 벽 하나 너머의 먼 인덱스(체크포인트·골 근처)가 "가장 가깝다"고 오판되는 사례가
+프로덕션 시드(`DEFAULT_SEED=12345` 1R 포함, path index 36과 78의 좌표가 완전히 동일했음)에서
+실측 확인됐다 — 벽을 뛰어넘어 체크포인트/골을 조기 통과 처리할 수 있는 정확성 버그.
+
+- **수정**: 진척도 판정을 유클리드 최근접 탐색에서, `generateStage` 시점에 스폰 기준으로
+  한 번 계산하는 BFS 그래프 거리 필드(`Stage.distanceField`, `procgen/reachability.ts`의
+  `bfsDistances`)로 교체했다. 매 프레임은 캐릭터가 서 있는 셀의 값을 O(1) 조회만 한다
+  (`core/round.ts`의 `progressAt`). 벽을 넘어가는 경로는 BFS 자체가 만들 수 없으므로, 이
+  결함 클래스는 구조적으로 재발 불가능하다.
+- **부수 발견**: 통로 폭이 2칸이라 서로 다른 carve 스텝의 셀이 벽 없이 walkable-인접할 수
+  있어(진짜 지름길), BFS 거리 기준 체크포인트 진행도가 carve 순서와 다르게 뒤바뀔 수 있음이
+  확인됐다(1000시드 sweep 중 재시도 30회로는 36건 실패). `generateStage`의 기존 재시도
+  게이트(`hasDistinctCells`와 같은 자리)에 "체크포인트·골 진행도가 오름차순인지"
+  (`isAscendingProgress`) 조건을 추가하고, 재시도 예산을 30→200회로 올려(BFS까지 포함해도
+  1000시드 생성 486ms — 체감 지연 없음) 1000시드 전부 통과하는 것을 확인 후 반영했다.
+- **API 변경**: `nearestPathIndex`/`respawnIndexFor` 폐기, `progressAt`/`respawnPointFor`로
+  대체(`Stage`에 `distanceField`/`checkpointProgress`/`goalProgress` 필드 추가). `path`/
+  `checkpointPathIndices`는 체크포인트 "배치" 로직(carve 순서 기반 균등 분할)이 계속 필요로
+  하므로 그대로 유지했다 — 이번 수정은 "진척도 판정" 축만 교체했고 "체크포인트 배치" 축은
+  건드리지 않았다.
