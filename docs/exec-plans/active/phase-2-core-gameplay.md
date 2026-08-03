@@ -49,7 +49,7 @@
 - [ ] 플레이 영상 (유튜브 공개 업로드 + 링크만 제출 — [[project-submission-video-hosting]])
 - [ ] 게임소개 PDF
 - [ ] AI활용기술문서 PDF — `docs/product-specs/ai-usage-report.md` 초안 작성됨(배영환 파트). 남은 작업: 게임 제목 확정 후 표지 갱신, 원호님 파트(콘텐츠/QA AI 활용) 보강, 스크린샷 첨부, PDF 변환
-- [ ] 팀원 롤 기술서 PDF (배영환: 백엔드/아키텍처/WBS, 송원호: 프론트엔드·UI/콘텐츠/QA)
+- [ ] 팀원 롤 기술서 PDF — `docs/product-specs/team-roles.md` 초안 작성됨(배영환 파트 완료, 송원호 파트는 커밋 로그 기반 초안만 — 본인 작성 필요)
 
 ## 검증 기준
 
