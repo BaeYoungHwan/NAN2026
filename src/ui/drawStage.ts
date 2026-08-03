@@ -8,7 +8,12 @@ import type { Stage } from "../core/stage";
  * 않아도 위화감이 적게 만든다. 배경 이미지가 없으면(로드 실패·미확보) 기존
  * 단색 배경으로 폴백한다.
  */
-export function drawStage(ctx: CanvasRenderingContext2D, stage: Stage, background: HTMLImageElement | null): void {
+export function drawStage(
+  ctx: CanvasRenderingContext2D,
+  stage: Stage,
+  background: HTMLImageElement | null,
+  checkpointsPassed: readonly boolean[],
+): void {
   const { grid } = stage;
   const mapWidth = grid.cols * grid.tileSize;
   const mapHeight = grid.rows * grid.tileSize;
@@ -34,14 +39,18 @@ export function drawStage(ctx: CanvasRenderingContext2D, stage: Stage, backgroun
     }
   }
 
-  ctx.shadowColor = "rgba(74, 144, 217, 0.9)";
+  // 통과한 세이브 포인트는 초록으로 바뀌어 계속 표시된다 — 지나가는 순간엔 판정
+  // 스킵 외에 아무 효과가 없어(GameCanvas의 justPassedSavePoint), 통과 여부를
+  // 눈으로 확인할 방법이 없다는 피드백이 있어 추가한 시각적 확인 수단.
   ctx.shadowBlur = 12;
-  ctx.fillStyle = "#4a90d9";
-  for (const checkpoint of stage.checkpoints) {
+  stage.checkpoints.forEach((checkpoint, i) => {
+    const passed = checkpointsPassed[i] ?? false;
+    ctx.shadowColor = passed ? "rgba(76, 175, 80, 0.9)" : "rgba(74, 144, 217, 0.9)";
+    ctx.fillStyle = passed ? "#4caf50" : "#4a90d9";
     ctx.beginPath();
     ctx.arc(checkpoint.x, checkpoint.y, 10, 0, Math.PI * 2);
     ctx.fill();
-  }
+  });
 
   ctx.shadowColor = "rgba(245, 166, 35, 0.9)";
   ctx.fillStyle = "#f5a623";

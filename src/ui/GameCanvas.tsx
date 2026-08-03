@@ -419,6 +419,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         : undefined;
       const bodyPose: BodyPose = deathInfo ? deathInfo.current : selectBodyPose(margin, isMoving);
       const shadowExpression = selectShadowExpression(margin);
+      // farthestProgressRef는 단조증가이므로, 통과한 세이브 포인트는 이후 계속 true로 유지된다.
+      const checkpointsPassed = stage.checkpointProgress.map((p) => farthestProgressRef.current >= p);
 
       renderFrame(ctx, stage, sprites, backgrounds?.[roundRef.current] ?? null, {
         characterPos: characterRef.current,
@@ -426,6 +428,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         bodyPose,
         shadowExpression,
         deathInfo,
+        checkpointsPassed,
         round: roundRef.current,
         cleared: clearedRef.current,
         dying: dyingRef.current,
@@ -476,6 +479,8 @@ interface RenderState {
   shadowExpression: ShadowExpression;
   /** 사망 시퀀스 중일 때만 존재 — 프레임 간 크로스페이드·흔들림 연출에 쓴다. */
   deathInfo?: DeathFrameInfo;
+  /** `stage.checkpoints`와 순서·길이가 같은 통과 여부 — 통과한 세이브 포인트를 다른 색으로 표시한다. */
+  checkpointsPassed: boolean[];
   round: Round;
   cleared: boolean;
   dying: boolean;
@@ -718,6 +723,7 @@ function renderFrame(
     bodyPose,
     shadowExpression,
     deathInfo,
+    checkpointsPassed,
     round,
     cleared,
     dying,
@@ -748,7 +754,7 @@ function renderFrame(
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
   ctx.translate(-camX, -camY);
 
-  drawStage(ctx, stage, background);
+  drawStage(ctx, stage, background, checkpointsPassed);
 
   // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
   if (isGuideVisible(round)) {
