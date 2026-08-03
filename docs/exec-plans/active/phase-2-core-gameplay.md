@@ -41,14 +41,14 @@
     2. 2차(재검증 요청에 따라 추가): 헤드리스 결과만으로는 실제 렌더링/입력 파이프라인까지 검증되지 않는다는 점을 보완하기 위해, `GameCanvas.tsx`에 임시 디버그 훅(`window.__ssDebug`, 커밋 전 원복 완료·diff 없음 확인됨)을 추가하고, 실제 브라우저(로컬 `npm run dev`, chrome-devtools MCP)에서 진짜 `KeyboardEvent`(keydown/keyup, WASD/`,`/`.`)를 dispatch해 실시간으로 자동 조종 — 결과: **1R 클리어(19.4초) → 2R 클리어(22.1초, 안전구역 가이드라인 정상 제거 확인) → 3R 클리어(12.0초, "디메리트: 이동키 반전 + 허용 각도 축소" HUD 정상 표시) → 엔딩 컷씬 진입("어라... 진짜로 무사히 통과하셨네요?")**까지 전 구간 스크린샷으로 시각 확인. 콘솔 에러 없음(`/favicon.ico` 404만 존재, 기능과 무관).
   - [x] **버그 발견 및 수정**: `drawShadowSprite`(`src/ui/GameCanvas.tsx`)의 전단(shear) 전용 변환이 `shadowAngle`이 정확히 수평(0° 또는 180°, sinθ≈0)일 때 완전히 퇴화(degenerate)되어 그림자 실루엣이 화면에 전혀 렌더링되지 않던 문제. `ctx.transform(1, 0, -stretch·cosθ, -stretch·sinθ, 0, 0)`에서 x축·y축 기저벡터가 둘 다 수평이 되어 2D 이미지가 폭 0으로 찌그러짐. 캔버스 픽셀 캡처로 재현 확인(각도 0°→비가시, 90°→정상 렌더링) 후 `shadowVerticalComponent()` 헬퍼로 sinθ에 최소 크기(0.12)를 강제하는 방식으로 수정 — 각도가 아주 살짝 어긋나 보이는 대가로 그림자가 항상 화면에 보이게 함. 회귀 테스트 4건 추가(`GameCanvas.test.ts`), 전체 98개 테스트 통과, 브라우저 실측으로 수정 확인. 같은 브랜치(`feature/round-independent-stages`)에 추가 커밋으로 반영(PR #11에 포함)
   - [x] **버그 발견 및 수정 (PR #11 리뷰 중)**: 진척도 판정(`nearestPathIndex`)이 캐릭터 위치에서 `stage.path` 중 유클리드 거리로 가장 가까운 인덱스를 찾는 방식이라 벽을 전혀 몰랐음. `carveCorridor`가 좁은 그리드 안에서 통로가 자기 자신 근처를 지나가는 경우가 흔해(300시드 전수 실측), 벽 하나 너머의 먼 인덱스(체크포인트·골 근처)가 "가장 가깝다"고 오판되는 사례가 실제 프로덕션 시드(`DEFAULT_SEED=12345` 1R 포함)에서 확인됨 — 체크포인트/골 조기 통과 가능한 정확성 버그. 스폰 기준 BFS 그래프 거리 필드(`Stage.distanceField`, `bfsDistances`)로 교체해 벽을 넘는 판정이 구조적으로 불가능하도록 수정(`progressAt`/`respawnPointFor`가 `nearestPathIndex`/`respawnIndexFor` 대체). 부수적으로 체크포인트 진행도 오름차순 재시도 게이트(`isAscendingProgress`) 추가, 재시도 예산 30→200회로 조정. 회귀 테스트 다수 추가(합성 그리드 벽 우회 검증, 200시드 sweep), `npm test`(107개) 전부 통과, `tsc`/`build` 클린. 상세 기록: `docs/design-docs/adr/ADR-003-procgen-corridor-collision.md` "버그 수정 기록 (2026-07-28)". 같은 브랜치에 추가 커밋으로 반영(PR #11에 포함)
-- [ ] 오늘 결정사항(Jump King 튜닝, 라운드=독립 스테이지, AI 제거) 배경·근거를 AI활용기술문서용으로 기록 (§C 참고)
+- [x] 오늘 결정사항(Jump King 튜닝, 라운드=독립 스테이지, AI 제거) 배경·근거를 AI활용기술문서용으로 기록 — `docs/product-specs/ai-usage-report.md` 초안 작성 완료 (§C 참고)
 
 ### C. 사전과제 제출물 5종 (마감 2026-08-10)
 
 - [ ] 플레이 가능 빌드 (GitHub Pages — 배포 완료, PRD 미결 사항 확정 후 최종 밸런스 반영 필요)
 - [ ] 플레이 영상 (유튜브 공개 업로드 + 링크만 제출 — [[project-submission-video-hosting]])
 - [ ] 게임소개 PDF
-- [ ] AI활용기술문서 PDF (Claude Code 활용 내역 — 설계 결정·프롬프트 기록 필요)
+- [ ] AI활용기술문서 PDF — `docs/product-specs/ai-usage-report.md` 초안 작성됨(배영환 파트). 남은 작업: 게임 제목 확정 후 표지 갱신, 원호님 파트(콘텐츠/QA AI 활용) 보강, 스크린샷 첨부, PDF 변환
 - [ ] 팀원 롤 기술서 PDF (배영환: 백엔드/아키텍처/WBS, 송원호: 프론트엔드·UI/콘텐츠/QA)
 
 ## 검증 기준
