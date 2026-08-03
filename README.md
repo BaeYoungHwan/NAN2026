@@ -6,6 +6,22 @@ NHN 주최 **NAN2026 AI 게임 개발 해커톤** 사전과제 제출용 웹 게
 
 ---
 
+## 사전과제 제출물 현황
+
+> 마감: 2026-08-10. NAN2026 사전과제는 아래 5종 제출물을 모두 요구합니다.
+
+| # | 제출물 | 형태 | 상태 | 위치/링크 |
+|---|--------|------|------|-----------|
+| 1 | 플레이 가능한 빌드 및 소스 코드 | 웹(GitHub Pages) + 소스 | ✅ 완료 | https://baeyounghwan.github.io/NAN2026/ |
+| 2 | 플레이 동영상 (30~60초) | YouTube | ⏳ 미착수 | - |
+| 3 | 게임 소개 및 설명 문서 | PDF | ⏳ 미착수 | - |
+| 4 | AI 활용 기술 문서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/ai-usage-report.md`](docs/product-specs/ai-usage-report.md) |
+| 5 | 팀원 롤 기술서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/team-roles.md`](docs/product-specs/team-roles.md) |
+
+플레이 가능 빌드는 배포돼 있지만, PRD 미결 사항(그림자 길이·통로 폭·게임 제목 등, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)이 확정되고 맵 디자인이 반영된 뒤 최종 밸런스로 갱신될 예정입니다.
+
+---
+
 ## 게임 소개
 
 저승사자가 동명이인 착오로 주인공을 저승에 데려온다. 아직 죽을 때가 아닌 주인공은 이승-저승 경계를 다시 넘어야 하는데, 경계를 넘는 동안 그림자가 불안정해져 몸과 그림자를 따로 붙잡고 있어야 한다.
