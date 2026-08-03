@@ -33,7 +33,7 @@ AI가 코드를 먼저 쓰지 않고, 대안을 표로 비교한 뒤 결정 근�
 | [ADR-001](../design-docs/adr/ADR-001-shadow-boundary-judgment.md) | 그림자 경계 판정 방식 | 초기 컨셉 확정 단계 |
 | [ADR-002](../design-docs/adr/ADR-002-shadow-dual-control.md) | 캐릭터·그림자 이중 조작(각도 허용치 모델) | 단일 판정 모델에서 재설계 |
 | [ADR-003](../design-docs/adr/ADR-003-procgen-corridor-collision.md) | 타일 그리드 + Carve + 판정자 주입 | 5개 대안 비교 표, 이후 재검토 조건 2건이 실제로 트리거되어 라운드-스테이지 분리로 이어짐 |
-| [ADR-004](../design-docs/adr/ADR-004-multi-light-source.md) | 다중 광원(가로등) — 최근접 광원 기준 안전구역 | 광원 전환 순간 유예(grace) 시간 등 엣지 케이스 설계 포함 |
+| [ADR-004](../design-docs/adr/ADR-004-multi-light-source.md) | 다중 광원(가로등) — 최근접 광원 기준 안전구역 | 광원 배치 겹침·체크포인트 판정 순서 등 엣지 케이스 3건을 추가 기록으로 반영. 단, 광원 전환 순간 유예(`LIGHT_SWITCH_GRACE_SECONDS`)는 같은 커밋(`105923b`)에서 함께 구현됐지만 ADR 본문엔 반영되지 않음 — ADR엔 "활성 광원 강조 표시"만 완화책으로 적혀 있어, 코드와 문서가 어긋난 상태(별도 정리 필요) |
 
 ---
 
