@@ -17,7 +17,10 @@ function App() {
   const [round, setRound] = useState<Round>(debugRoundFromQuery);
   const [dialogueQueue, setDialogueQueue] = useState<string[]>([]);
   const [dialogueAutoDismissMs, setDialogueAutoDismissMs] = useState<number | undefined>(undefined);
-  const [showOpening, setShowOpening] = useState(true);
+  // ?round=2/3 디버그 프리뷰로 들어온 경우(개발 빌드 한정 — debugRoundFromQuery
+  // 참고) 오프닝 컷신을 건너뛴다. 절차적 생성 맵을 빠르게 확인하려는 목적과
+  // 오프닝이 항상 뜨는 게 어긋난다는 지적(PR #17 리뷰) 반영.
+  const [showOpening, setShowOpening] = useState(() => round === 1);
   const [showEnding, setShowEnding] = useState(false);
   const gameCanvasRef = useRef<GameCanvasHandle>(null);
 

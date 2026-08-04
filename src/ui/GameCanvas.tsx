@@ -226,7 +226,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   // 마지막 수평 이동 방향 — 스프라이트가 원본은 오른쪽을 보고 있으므로 왼쪽 이동 시 좌우 반전한다.
   const facingRightRef = useRef(true);
   const [sprites, setSprites] = useState<CharacterSprites | null>(null);
-  const [backgrounds, setBackgrounds] = useState<Record<Round, HTMLImageElement | null> | null>(null);
+  const [background, setBackground] = useState<HTMLImageElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,7 +244,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     let cancelled = false;
     loadBackgroundArt()
       .then((loaded) => {
-        if (!cancelled) setBackgrounds(loaded);
+        if (!cancelled) setBackground(loaded);
       })
       .catch((error) => console.error(error));
     return () => {
@@ -271,9 +271,12 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // ?round= 디버그 진입점과 무관하게 항상 1R부터 다시 시작한다 — "재시작"은
       // 게임을 처음부터 다시 플레이한다는 의미이지, 프리뷰 중이던 라운드로
       // 돌아오는 버튼이 아니다. ?round=2/3으로 들어와 프리뷰하다 재시작을 누르면
-      // 1R로 넘어가는 게 의도된 동작이다.
+      // 1R로 넘어가는 게 의도된 동작이다. `seedForRound(DEFAULT_SEED, 1) ===
+      // DEFAULT_SEED`가 항상 성립해 `generateStage(DEFAULT_SEED)`와 결과가
+      // 같지만(초기화 로직 참고), 그 항등식이 나중에 바뀌면 여기가 조용히
+      // 어긋날 수 있으므로 `seedForRound`를 명시적으로 거쳐 대칭을 유지한다.
       restart: () => {
-        loadStage(generateStage(DEFAULT_SEED));
+        loadStage(generateStage(seedForRound(DEFAULT_SEED, 1)));
         roundRef.current = 1;
         onRoundChange?.(1, false);
         clearedRef.current = false;
@@ -428,7 +431,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // farthestProgressRef는 단조증가이므로, 통과한 세이브 포인트는 이후 계속 true로 유지된다.
       const checkpointsPassed = stage.checkpointProgress.map((p) => farthestProgressRef.current >= p);
 
-      renderFrame(ctx, stage, sprites, backgrounds?.[roundRef.current] ?? null, {
+      renderFrame(ctx, stage, sprites, background, {
         characterPos: characterRef.current,
         shadowAngle: shadowAngleRef.current,
         bodyPose,
@@ -451,7 +454,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, backgrounds]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, background]);
 
   return (
     <>
@@ -760,12 +763,14 @@ function renderFrame(
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
   ctx.translate(-camX, -camY);
 
-  drawStage(ctx, stage, background, checkpointsPassed);
+  drawStage(ctx, stage, background, checkpointsPassed, round);
 
-  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 보라는
-  // background-art-prompt-guide.md 컬러 팔레트에서 "안전 구역 경계선 UI 전용"으로
-  // 예약된 색이라(배경/타일 프롬프트에도 명시), 이 가이드라인과 아래 벽 오버레이는
-  // 항상 같은 보라 계열을 써서 "위험 경계"라는 의미를 통일한다.
+  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 이 연분홍
+  // (#dcafbe)은 background-art-prompt-guide.md 컬러 팔레트가 "안전구역 경계선
+  // UI 전용"으로 예약해 둔 포인트색이다. 벽 오버레이는 이 PR에서 석재 턱
+  // 재질(따뜻한 무채색, drawStage.ts의 buildWallLayer 참고)로 바뀌었으므로 더
+  // 이상 같은 색 계열이 아니다 — "위험 경계"라는 의미는 형태(부채꼴 vs 턱)로만
+  // 구분한다.
   if (isGuideVisible(round)) {
     ctx.beginPath();
     ctx.moveTo(characterPos.x, characterPos.y);

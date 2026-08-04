@@ -1,12 +1,5 @@
-import type { Round } from "../core/round";
-
 const ASSET_BASE = `${import.meta.env.BASE_URL}assets/backgrounds/`;
-
-const BACKGROUND_FILES: Record<Round, string> = {
-  1: "round1.png",
-  2: "round2.png",
-  3: "round3.png",
-};
+const BACKGROUND_FILE = "stage.png";
 
 function loadImage(fileName: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -18,19 +11,16 @@ function loadImage(fileName: string): Promise<HTMLImageElement> {
 }
 
 /**
- * 라운드별 배경 이미지를 로드한다. 아직 배경 에셋이 준비되지 않은 라운드가 있어도
- * 게임 진행이 막히지 않도록, 해당 라운드만 null로 남기고 나머지는 정상 로드한다
- * (drawStage가 null이면 기존 단색 배경으로 폴백한다).
+ * 스테이지 배경 이미지를 로드한다. 라운드마다 별도 PNG를 두지 않고 한 장을
+ * 공유한다 — 라운드별 명암 차이는 `drawStage`가 `ROUND_BACKGROUND_BRIGHTNESS`
+ * 배율로 그려서 낸다(PR #17 리뷰: round2/3.png가 round1.png를 밝기만 바꿔
+ * 다시 구운 것이라 4.6MB가 순수 중복이었다). 로드에 실패해도 게임 진행이
+ * 막히지 않도록 null을 반환하고, `drawStage`는 null이면 단색 배경으로 폴백한다.
  */
-export async function loadBackgroundArt(): Promise<Record<Round, HTMLImageElement | null>> {
-  const entries = await Promise.all(
-    (Object.entries(BACKGROUND_FILES) as [string, string][]).map(async ([round, file]) => {
-      try {
-        return [Number(round) as Round, await loadImage(file)] as const;
-      } catch {
-        return [Number(round) as Round, null] as const;
-      }
-    }),
-  );
-  return Object.fromEntries(entries) as Record<Round, HTMLImageElement | null>;
+export async function loadBackgroundArt(): Promise<HTMLImageElement | null> {
+  try {
+    return await loadImage(BACKGROUND_FILE);
+  } catch {
+    return null;
+  }
 }

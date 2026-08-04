@@ -1,14 +1,55 @@
 import type { Stage } from "../core/stage";
+import { ROUND_BACKGROUND_BRIGHTNESS, type Round } from "../core/round";
 
 /**
  * `#rrggbb` 헥스 문자열을 `"r, g, b"` 콤마 구분 문자열로 변환한다 —
  * `rgba(${...}, alpha)` 템플릿에 그대로 끼워 넣기 위함. 촛불 색을 hex 하나로만
  * 받고 여기서 rgb를 파생시켜, 두 표현을 따로 넘기다 하나만 바뀌어 어긋나는
- * 실수를 구조적으로 막는다.
+ * 실수를 구조적으로 막는다. `#rrggbb`(6자리) 형식만 지원 — 호출부가 전부 이
+ * 파일 안의 하드코딩 리터럴이라 실사용 위험은 없지만, `#fff` 같은 축약형이
+ * 들어오면 조용히 틀린 값을 내므로 방어적으로 걸러낸다.
  */
 function hexToRgbString(hex: string): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
+    console.warn(`hexToRgbString: "#rrggbb" 형식이 아님 — ${hex}`);
+    return "255, 255, 255";
+  }
   const value = parseInt(hex.slice(1), 16);
   return `${(value >> 16) & 0xff}, ${(value >> 8) & 0xff}, ${value & 0xff}`;
+}
+
+/**
+ * dusk(세로 그라디언트)·vignette(방사형 그라디언트)는 mapWidth/mapHeight로만
+ * 결정되는데, 이 값은 stage가 바뀌기 전까지 상수다 — 그런데도 매 프레임(rAF)
+ * `createLinearGradient`/`createRadialGradient`를 새로 호출하고 있었다(PR #17
+ * 리뷰). `wallLayerCache`와 같은 이유로 같은 패턴을 적용한다: `CanvasGradient`는
+ * 그걸 만든 컨텍스트에 종속되지 않으므로(Path2D처럼 이식 가능한 객체) stage당
+ * 한 번만 만들어 WeakMap에 캐싱해도 안전하다.
+ */
+const atmosphereCache = new WeakMap<Stage, { dusk: CanvasGradient; vignette: CanvasGradient }>();
+
+function buildAtmosphere(
+  ctx: CanvasRenderingContext2D,
+  mapWidth: number,
+  mapHeight: number,
+): { dusk: CanvasGradient; vignette: CanvasGradient } {
+  const dusk = ctx.createLinearGradient(0, 0, 0, mapHeight);
+  dusk.addColorStop(0, "rgba(24, 18, 36, 0.6)");
+  dusk.addColorStop(0.55, "rgba(12, 9, 18, 0.55)");
+  dusk.addColorStop(1, "rgba(5, 4, 8, 0.62)");
+
+  const vignette = ctx.createRadialGradient(
+    mapWidth / 2,
+    mapHeight / 2,
+    mapHeight * 0.25,
+    mapWidth / 2,
+    mapHeight / 2,
+    mapHeight * 0.75,
+  );
+  vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+  vignette.addColorStop(1, "rgba(0, 0, 0, 0.4)");
+
+  return { dusk, vignette };
 }
 
 /**
@@ -30,7 +71,14 @@ function buildWallLayer(stage: Stage): HTMLCanvasElement {
   layer.width = mapWidth;
   layer.height = mapHeight;
   const ctx = layer.getContext("2d");
-  if (!ctx) return layer;
+  if (!ctx) {
+    // 2D 컨텍스트를 못 만들면(jsdom 등 canvas 미지원 환경) 빈 캔버스가 그대로
+    // wallLayerCache에 캐싱돼 벽이 계속 안 보이게 된다 — 충돌 판정(collider)은
+    // grid 데이터로 별도 동작하므로 게임 자체는 멈추지 않지만, 눈에 보이지 않는
+    // 벽에 부딪히는 것처럼 보일 수 있어 최소한 콘솔에 남긴다.
+    console.warn("buildWallLayer: 2D 컨텍스트 생성 실패 — 벽 레이어가 비어 있음");
+    return layer;
+  }
 
   const isWall = (row: number, col: number): boolean => {
     if (row < 0 || row >= grid.rows || col < 0 || col >= grid.cols) return true;
@@ -42,7 +90,7 @@ function buildWallLayer(stage: Stage): HTMLCanvasElement {
   // 애초에 정의해 둔 "바닥보다 확실히 어두운 석재 턱(raised stone curb/ledge),
   // 베벨진 위쪽 모서리에 밝은 rim + 바닥과 맞닿는 부분의 은은한 AO 그림자"라는
   // 실제 벽 재질 스펙을 그대로 코드로 옮긴다. 채우기 자체도 배경 사진 평균 색
-  // (round1.png ≈ rgb(125,112,91))과 같은 따뜻한 무채색 계열의 어두운 버전으로 —
+  // (stage.png ≈ rgb(125,112,91))과 같은 따뜻한 무채색 계열의 어두운 버전으로 —
   // 검정이나 보라가 아니라 "같은 돌바닥의 그림자 진 부분"처럼 보이게 한다.
   ctx.fillStyle = "rgba(40, 36, 31, 0.92)";
   for (let row = 0; row < grid.rows; row++) {
@@ -119,18 +167,20 @@ function buildWallLayer(stage: Stage): HTMLCanvasElement {
 }
 
 /**
- * 스테이지 배경과 지형(벽 셀)·골 지점을 그린다. 배경은 라운드별 정적 아트
- * (`backgroundArt.ts`)이고, 벽은 시드마다 통로 모양이 달라지는 절차적 타일이라
- * 배경 그림과 픽셀 단위로 맞지 않는다 — 그래서 벽을 불투명 사각형이 아니라
- * "그림자 세계의 경계"처럼 보이는 반투명 오버레이로 그려, 배경과 정확히 겹치지
- * 않아도 위화감이 적게 만든다. 배경 이미지가 없으면(로드 실패·미확보) 기존
- * 단색 배경으로 폴백한다.
+ * 스테이지 배경과 지형(벽 셀)·골 지점을 그린다. 배경은 라운드 공통 정적 아트
+ * 한 장(`backgroundArt.ts`)이고, 벽은 시드마다 통로 모양이 달라지는 절차적
+ * 타일이라 배경 그림과 픽셀 단위로 맞지 않는다 — 그래서 벽을 배경과 뚜렷이
+ * 구분되는 불투명한 석재 턱(채우기+AO+베벨)으로 그려, 절차적 타일과 정적
+ * 배경이 같은 자리를 공유하지 않아도 "이건 그림"과 "이건 지형"이 헷갈리지
+ * 않게 한다. 배경 이미지가 없으면(로드 실패·미확보) 기존 단색 배경으로
+ * 폴백한다.
  */
 export function drawStage(
   ctx: CanvasRenderingContext2D,
   stage: Stage,
   background: HTMLImageElement | null,
   checkpointsPassed: readonly boolean[],
+  round: Round,
 ): void {
   const { grid } = stage;
   const mapWidth = grid.cols * grid.tileSize;
@@ -140,6 +190,15 @@ export function drawStage(
     ctx.drawImage(background, 0, 0, mapWidth, mapHeight);
   } else {
     ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, mapWidth, mapHeight);
+  }
+
+  // 라운드가 올라갈수록 어두워지는 연출 — round2/3 전용 PNG를 따로 굽는 대신
+  // (동일 배경을 밝기만 바꿔 재저장하면 픽셀은 사실상 같은데 파일만 늘어난다,
+  // PR #17 리뷰) 이 검정 오버레이 alpha로 밝기를 낮춘다.
+  const brightness = ROUND_BACKGROUND_BRIGHTNESS[round];
+  if (brightness < 1) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${1 - brightness})`;
     ctx.fillRect(0, 0, mapWidth, mapHeight);
   }
 
@@ -155,24 +214,14 @@ export function drawStage(
   // 고이듯 더 짙어지는 세로 그라디언트로 깊이감을 준다. 그 위에 맵 중심에서
   // 가장자리로 갈수록 짙어지는 비네트를 한 겹 더 얹어, 통로 구석이 화면 프레임처럼
   // 딱 잘리지 않고 자연스럽게 어둠 속으로 스며들게 한다.
-  const dusk = ctx.createLinearGradient(0, 0, 0, mapHeight);
-  dusk.addColorStop(0, "rgba(24, 18, 36, 0.6)");
-  dusk.addColorStop(0.55, "rgba(12, 9, 18, 0.55)");
-  dusk.addColorStop(1, "rgba(5, 4, 8, 0.62)");
-  ctx.fillStyle = dusk;
+  let atmosphere = atmosphereCache.get(stage);
+  if (!atmosphere) {
+    atmosphere = buildAtmosphere(ctx, mapWidth, mapHeight);
+    atmosphereCache.set(stage, atmosphere);
+  }
+  ctx.fillStyle = atmosphere.dusk;
   ctx.fillRect(0, 0, mapWidth, mapHeight);
-
-  const vignette = ctx.createRadialGradient(
-    mapWidth / 2,
-    mapHeight / 2,
-    mapHeight * 0.25,
-    mapWidth / 2,
-    mapHeight / 2,
-    mapHeight * 0.75,
-  );
-  vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
-  vignette.addColorStop(1, "rgba(0, 0, 0, 0.4)");
-  ctx.fillStyle = vignette;
+  ctx.fillStyle = atmosphere.vignette;
   ctx.fillRect(0, 0, mapWidth, mapHeight);
 
   // 벽 채우기+AO+베벨은 stage가 바뀌기 전까지 절대 안 변하는 정적 레이어라
@@ -311,5 +360,4 @@ export function drawStage(
   });
 
   drawCandleMark(stage.goal.x, stage.goal.y, "#f5a623");
-  ctx.shadowBlur = 0;
 }
