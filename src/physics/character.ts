@@ -10,6 +10,17 @@ export interface MoveInput {
   right: boolean;
 }
 
+export interface MoveResult {
+  position: Point;
+  /**
+   * 그 축으로 움직이려 했지만 벽에 막힌 경우 true — 벽 충돌 효과음의 트리거다.
+   * "위치가 변하지 않았다"로는 대신할 수 없다: 축 분리 이동이라 대각선 중 한
+   * 축만 막히는 경우가 흔하고, 그때도 결과 위치는 바뀌기 때문이다.
+   */
+  blockedX: boolean;
+  blockedY: boolean;
+}
+
 /**
  * 입력 방향으로 캐릭터를 이동시킨다. `canOccupy`는 특정 좌표를 캐릭터가
  * 차지할 수 있는지 판정하는 함수(예: `physics/collider.ts`의 벽 충돌 판정)이며,
@@ -26,7 +37,7 @@ export function moveCharacter(
   input: MoveInput,
   deltaSeconds: number,
   canOccupy: (point: Point) => boolean,
-): Point {
+): MoveResult {
   let dx = 0;
   let dy = 0;
 
@@ -45,18 +56,25 @@ export function moveCharacter(
   const deltaY = dy * CHARACTER_SPEED * deltaSeconds;
 
   let next = position;
+  let blockedX = false;
+  let blockedY = false;
 
   const afterX = { x: next.x + deltaX, y: next.y };
   if (canOccupy(afterX)) {
     next = afterX;
+  } else if (deltaX !== 0) {
+    // 애초에 그 축으로 움직일 의도가 없었으면(deltaX === 0) 막힌 것이 아니다.
+    blockedX = true;
   }
 
   const afterY = { x: next.x, y: next.y + deltaY };
   if (canOccupy(afterY)) {
     next = afterY;
+  } else if (deltaY !== 0) {
+    blockedY = true;
   }
 
-  return next;
+  return { position: next, blockedX, blockedY };
 }
 
 /** 3R 디메리트 — 이동 입력의 상하좌우를 반전시킨다(대각선 입력도 각 축이 반전됨). */

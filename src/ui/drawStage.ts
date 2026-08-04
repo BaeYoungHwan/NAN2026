@@ -446,7 +446,7 @@ export function drawStage(
   ctx: CanvasRenderingContext2D,
   stage: Stage,
   background: HTMLImageElement | null,
-  checkpointsPassed: readonly boolean[],
+  checkpointsActivated: readonly boolean[],
   round: Round,
 ): void {
   const { grid } = stage;
@@ -516,9 +516,9 @@ export function drawStage(
   // 세이브 포인트·골을 "제단 촛불"로 그린다 — 광원(육각 랜턴, 기하학적·서 있는
   // 기둥형)과 실루엣이 겹치면 둘을 헷갈리게 되므로, 촛불은 각진 형태 없이 둥근
   // 받침 위에 유기적인 불꽃 하나만 두어 "잠시 쉬어가는 지점"이라는 성격을
-  // 형태로도 구분한다. 통과한 세이브 포인트는 초록으로 바뀌어 계속 표시된다
-  // (GameCanvas의 justPassedSavePoint로는 통과 여부를 눈으로 확인할 방법이 없다는
-  // 피드백 반영). 미통과 색은 고정 팔레트의 크림톤 — 보라는 안전 구역 경계선/벽
+  // 형태로도 구분한다. 직접 밟아 활성화한 세이브 포인트는 초록으로 바뀌어 계속
+  // 표시된다(GameCanvas의 justReachedSavePoint로는 활성화 여부를 눈으로 확인할
+  // 방법이 없다는 피드백 반영). 미활성 색은 고정 팔레트의 크림톤 — 보라는 안전 구역 경계선/벽
   // 테두리 전용이라 재사용하면 "이것도 위험 경계인가?" 하는 혼동을 준다.
   // 좌표를 시드로 미세한 개체차를 준다 — 촛불마다 완전히 똑같이 찍어낸 스탬프처럼
   // 보이지 않도록, 불꽃이 살짝 한쪽으로 기울고 잔불 크기가 조금씩 달라지게 한다.
@@ -754,8 +754,8 @@ export function drawStage(
   };
 
   stage.checkpoints.forEach((checkpoint, i) => {
-    const passed = checkpointsPassed[i] ?? false;
-    drawCandleMark(checkpoint.x, checkpoint.y, passed ? "#4caf50" : "#f0e6d2");
+    const activated = checkpointsActivated[i] ?? false;
+    drawCandleMark(checkpoint.x, checkpoint.y, activated ? "#4caf50" : "#f0e6d2");
   });
 
   drawCandleMark(stage.goal.x, stage.goal.y, "#f5a623");

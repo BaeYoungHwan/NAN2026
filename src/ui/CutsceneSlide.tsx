@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
+import type { SfxCue } from "../audio/soundCues";
 
 interface CutsceneSlideProps {
   /** 순서대로 보여줄 슬라이드 텍스트 목록. */
   slides: readonly string[];
   /** 마지막 슬라이드까지 넘긴 뒤 호출된다. */
   onFinish: () => void;
+  /** 효과음 재생 — 없으면 조용히 동작한다. */
+  playSound?: (cue: SfxCue) => void;
 }
 
 /**
@@ -13,12 +16,13 @@ interface CutsceneSlideProps {
  * 배경이 불투명해 GameCanvas·HUD를 완전히 가리지만, RestartButton은 자체
  * z-index로 이 위에서도 보이고 클릭 가능하다 (컷신 표시 중에도 재시작 가능).
  */
-function CutsceneSlide({ slides, onFinish }: CutsceneSlideProps) {
+function CutsceneSlide({ slides, onFinish, playSound }: CutsceneSlideProps) {
   const [index, setIndex] = useState(0);
 
   const advance = useCallback(() => {
+    playSound?.("cutsceneAdvance");
     setIndex((current) => current + 1);
-  }, []);
+  }, [playSound]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

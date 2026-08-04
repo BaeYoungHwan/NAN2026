@@ -1,11 +1,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MutableRefObject } from "react";
+import type { AudioEngine } from "../audio/audioEngine";
+import { dangerBeepSpec, justReturnedToSafety } from "../audio/dangerTone";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
 import { debugRoundFromQuery } from "../core/debugRound";
 import {
   controlsReversed,
   effectiveAngleTolerance,
+  hasTouchedCheckpoint,
   isGuideVisible,
   isStageCleared,
   progressAt,
@@ -170,6 +173,16 @@ interface GameCanvasProps {
   onRoundChange?: (round: Round, stageCleared: boolean) => void;
   /** true인 동안 캐릭터 이동·그림자 회전·판정을 멈춘다 (저승사자 대사 표시 중 등). */
   inputDisabled?: boolean;
+  /**
+   * 효과음 재생용 오디오 엔진 참조 (`audio/useAudio.ts`). 엔진은 비동기로 준비되고
+   * 에셋이 없으면 아예 만들어지지 않으므로 항상 null일 수 있다 — 게임 진행은 이
+   * 값과 무관하게 동작해야 한다.
+   *
+   * 엔진 자체가 아니라 ref를 받는 이유: 뮤트 토글 등으로 오디오 상태가 바뀔 때마다
+   * 게임 루프(rAF)가 재시작되면 안 되는데, ref는 참조가 불변이라 아래 useEffect의
+   * 의존성에 들어가도 루프를 다시 만들지 않는다.
+   */
+  audioEngineRef?: MutableRefObject<AudioEngine | null>;
 }
 
 /**
@@ -195,7 +208,7 @@ interface GameCanvasProps {
  * 둘 이유가 없다.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
-  { onDeathCountChange, onRoundChange, inputDisabled = false },
+  { onDeathCountChange, onRoundChange, inputDisabled = false, audioEngineRef },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -211,15 +224,16 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const roundRef = useRef<Round>(initialRound);
   const clearedRef = useRef(false);
   // 이 라운드 스테이지 안에서 가장 멀리 도달한 진척도(스폰 기준 BFS 통로 거리,
-  // `progressAt`) — 단조증가, 사망해도 줄지 않는다. 라운드 전환(스테이지
-  // 자체가 새로 생성되는 것)과는 별개로, "이 스테이지의 세이브 포인트를
-  // 지나쳤는지"만 이 값으로 판정한다(`respawnPointFor`) — 정확히 밟지 않고
-  // 지나치기만 해도 인정된다. 사망 리스폰 지점은 이 값을 그대로 쓰지 않고
-  // `respawnPointFor`로 마지막 체크포인트에 스냅한다 — 그대로 쓰면 "죽은
-  // 자리에서 그대로 재개"가 되어 사망 페널티가 없어진다(실제로 겪은 버그,
-  // `respawnPointFor` 주석 참고). 라운드가 전환되면(다음 스테이지로 교체)
-  // `loadStage`가 0으로 리셋한다.
+  // `progressAt`) — 단조증가, 사망해도 줄지 않는다. **골 도달(스테이지 클리어)
+  // 판정 전용**이다. 세이브 포인트 판정에는 쓰지 않는다 — 이 값은 방향 정보가
+  // 없는 스칼라라서, 체크포인트와 정반대 갈래로 가도 "통과"로 처리되는 버그가
+  // 있었다(`core/round.ts`의 `respawnPointFor` 주석 참고). 라운드가 전환되면
+  // (다음 스테이지로 교체) `loadStage`가 0으로 리셋한다.
   const farthestProgressRef = useRef(0);
+  // 이 스테이지의 세이브 포인트를 직접 밟아 활성화했는지 — `stage.checkpoints`와
+  // 순서·길이가 같다. 한 번 true가 되면 그 스테이지가 끝날 때까지 유지되고(래치),
+  // 사망 리스폰 지점(`respawnPointFor`)과 화면 표시가 모두 이 값만 본다.
+  const checkpointsReachedRef = useRef<boolean[]>(stageRef.current.checkpoints.map(() => false));
   // 직전 프레임의 최근접(활성) 광원 — 바뀌는 순간을 감지해 판정 유예를 주기 위함 (ADR-004).
   const activeLightRef = useRef<Point>(nearestLight(stageRef.current.lightSources, stageRef.current.spawn));
   // 광원 전환 유예 남은 시간(초) — 0보다 크면 이번 프레임 정렬 판정을 건너뛴다.
@@ -231,6 +245,14 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const deathAnimStartRef = useRef(0);
   // 마지막 수평 이동 방향 — 스프라이트가 원본은 오른쪽을 보고 있으므로 왼쪽 이동 시 좌우 반전한다.
   const facingRightRef = useRef(true);
+  // --- 오디오 타이밍 상태 (렌더에 영향을 주지 않으므로 전부 ref) ---
+  // 마지막 위험 경고음을 낸 시각(ms) — dangerBeepSpec이 준 간격만큼 지나야 다음 비프를 낸다.
+  const lastDangerBeepAtRef = useRef(0);
+  // 직전 프레임의 위험도 — 위험 구간에서 안전으로 빠져나온 순간을 잡아 안도음을 낸다.
+  const previousMarginRef = useRef(0);
+  // 마지막으로 발소리를 낸 걷기 프레임 번호 — 걷기 애니메이션(WALK_FRAME_MS)과 발소리를
+  // 같은 주기로 묶어 발이 땅에 닿는 타이밍에 소리가 나게 한다. 멈추면 -1로 리셋한다.
+  const lastFootstepFrameRef = useRef(-1);
   const [sprites, setSprites] = useState<CharacterSprites | null>(null);
   const [background, setBackground] = useState<HTMLImageElement | null>(null);
 
@@ -265,10 +287,14 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     characterRef.current = { ...nextStage.spawn };
     shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
     farthestProgressRef.current = 0;
+    checkpointsReachedRef.current = nextStage.checkpoints.map(() => false);
     activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
     lightSwitchGraceRef.current = 0;
     dyingRef.current = false;
     facingRightRef.current = true;
+    // 위치가 통째로 바뀌면 위험도도 불연속으로 변한다 — 직전 값을 그대로 두면
+    // 새 스테이지 첫 프레임에 "위험에서 벗어났다"고 오판해 안도음이 울린다.
+    previousMarginRef.current = 0;
   }
 
   useImperativeHandle(
@@ -312,17 +338,13 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // 걷기 포즈가 재생되는(대사창 뜬 사이 이동키가 눌려있으면) 문제가 있었다 —
       // 아래 두 값은 실제 이동 처리가 일어나는 분기 안에서만 갱신한다.
       let isMoving = false;
+      const audio = audioEngineRef?.current ?? null;
 
       if (dyingRef.current) {
         if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
-          // 리스폰은 farthestProgressRef(현재 위치 기준 진척도)가 아니라 마지막으로
-          // 넘은 체크포인트로 스냅한다 — 그대로 쓰면 사망 페널티가 없어진다(위 함수 설명 참고).
-          const respawnPoint = respawnPointFor(
-            farthestProgressRef.current,
-            stage.spawn,
-            stage.checkpoints,
-            stage.checkpointProgress,
-          );
+          // 리스폰은 죽은 자리가 아니라 마지막으로 **직접 밟은** 세이브 포인트로
+          // 스냅한다 — 하나도 안 밟았으면 스폰으로 돌아간다(정상 플레이).
+          const respawnPoint = respawnPointFor(stage.spawn, stage.checkpoints, checkpointsReachedRef.current);
           characterRef.current = { ...respawnPoint };
           shadowAngleRef.current = naturalAngle(stage.lightSources, respawnPoint);
           // 리스폰으로 위치가 세이브 포인트로 튀는 것 자체가 "광원이 바뀐 것"처럼
@@ -333,6 +355,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           // 보며 달리는 것처럼 보인다 — 리스폰 시 기본 방향(오른쪽)으로 되돌린다.
           facingRightRef.current = true;
           dyingRef.current = false;
+          // 죽던 순간의 위험도(1 초과)가 남아 있으면, 리스폰으로 정렬이 회복되는
+          // 이 프레임이 "위험에서 벗어난 순간"으로 잡혀 안도음이 리스폰음과 겹친다.
+          previousMarginRef.current = 0;
+          audio?.play("respawn");
         }
       } else if (!clearedRef.current && !inputDisabled) {
         if (colliderCacheRef.current?.stage !== stage) {
@@ -342,17 +368,39 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         const moveInput = controlsReversed(roundRef.current)
           ? reverseMoveInput(inputRef.current)
           : inputRef.current;
-        characterRef.current = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
+        const moveResult = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
+        characterRef.current = moveResult.position;
+        // 벽에 부딪힌 축이 있으면 둔탁한 소리를 낸다 — 벽에 붙어 달리면 매 프레임
+        // 발생하므로 실제 재생 빈도는 큐 쿨다운(soundCues.ts)이 제한한다.
+        if (moveResult.blockedX || moveResult.blockedY) audio?.play("wallBump");
 
         if (moveInput.right) facingRightRef.current = true;
         else if (moveInput.left) facingRightRef.current = false;
         isMoving = moveInput.up || moveInput.down || moveInput.left || moveInput.right;
+
+        // 발소리를 걷기 애니메이션과 같은 주기에 묶는다 — 프레임이 바뀌는 순간이
+        // 곧 발이 땅에 닿는 순간이라, 별도 타이머를 두면 그림과 소리가 어긋난다.
+        if (isMoving) {
+          const walkFrame = Math.floor(time / WALK_FRAME_MS);
+          if (walkFrame !== lastFootstepFrameRef.current) {
+            lastFootstepFrameRef.current = walkFrame;
+            audio?.play("footstep");
+          }
+        } else {
+          lastFootstepFrameRef.current = -1;
+        }
 
         if (inputRef.current.rotateCW) {
           shadowAngleRef.current += ROTATION_SPEED * deltaSeconds;
         }
         if (inputRef.current.rotateCCW) {
           shadowAngleRef.current -= ROTATION_SPEED * deltaSeconds;
+        }
+        // 회전하는 동안만 이어지는 루프음. 엔진이 중복 호출을 무시하므로 매 프레임 불러도 된다.
+        if (inputRef.current.rotateCW || inputRef.current.rotateCCW) {
+          audio?.startLoop("rotateLoop");
+        } else {
+          audio?.stopLoop("rotateLoop");
         }
 
         // 최근접(활성) 광원이 바뀌는 순간을 감지해 판정 유예를 건다 — 광원 전환
@@ -363,50 +411,60 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         if (currentActiveLight.x !== activeLightRef.current.x || currentActiveLight.y !== activeLightRef.current.y) {
           lightSwitchGraceRef.current = LIGHT_SWITCH_GRACE_SECONDS;
           activeLightRef.current = currentActiveLight;
+          // 요구 각도가 방금 크게 바뀌었고 잠시 무적이라는 것을 알린다 — 이 소리가
+          // 없으면 플레이어는 왜 갑자기 그림자를 크게 돌려야 하는지 알 수 없다.
+          audio?.play("lightSwitch");
         }
 
-        // 진척도(스폰 기준 BFS 통로 거리, `progressAt`)를 먼저 갱신한다 — 이
-        // 스테이지(라운드) 안의 세이브 포인트 판정이 전부 이 값 기준이다.
-        // 벽을 고려한 그래프 거리라, 캐릭터가 있는 셀 자체의 진행 거리만
-        // 인정되고 벽 건너편의 공간적으로 가까운 지점으로는 튀지 않는다(이전
-        // 유클리드 최근접 방식의 문제 — ADR-003 "버그 수정 기록" 참고).
+        // 진척도(스폰 기준 BFS 통로 거리, `progressAt`)를 갱신한다 — 골 도달
+        // 판정 전용이다. 벽을 고려한 그래프 거리라, 캐릭터가 있는 셀 자체의 진행
+        // 거리만 인정되고 벽 건너편의 공간적으로 가까운 지점으로는 튀지 않는다
+        // (이전 유클리드 최근접 방식의 문제 — ADR-003 "버그 수정 기록" 참고).
         // farthestProgressRef는 단조증가라 사망 리스폰(위 dyingRef 분기)도
         // 되돌아가지 않는다.
-        const previousFarthest = farthestProgressRef.current;
         const currentProgress = progressAt(stage.grid, stage.distanceField, characterRef.current);
         if (currentProgress > farthestProgressRef.current) {
           farthestProgressRef.current = currentProgress;
         }
 
-        // 이 스테이지 안의 세이브 포인트를 이번 프레임에 새로 지나쳤는지 — 라운드
-        // 전환과는 별개로, 광원 전환 경계선과 체크포인트 근방이 우연히 겹칠 때
-        // (ADR-004) 정렬 판정을 스킵해 불공정한 사망을 막기 위한 용도다.
-        const justPassedSavePoint = stage.checkpointProgress.some(
-          (progress) => previousFarthest < progress && farthestProgressRef.current >= progress,
-        );
+        // 이번 프레임에 세이브 포인트를 새로 밟았는지 — 활성화(래치)와, 그 프레임의
+        // 정렬 판정 스킵에 함께 쓴다. 스킵은 광원 전환 경계선과 체크포인트 근방이
+        // 우연히 겹칠 때(ADR-004) 불공정한 사망을 막기 위한 용도다.
+        let justReachedSavePoint = false;
+        stage.checkpoints.forEach((checkpoint, i) => {
+          if (checkpointsReachedRef.current[i]) return;
+          if (!hasTouchedCheckpoint(characterRef.current, checkpoint)) return;
+          checkpointsReachedRef.current[i] = true;
+          justReachedSavePoint = true;
+          audio?.play("checkpoint");
+        });
         // 이 라운드 스테이지의 골(goalProgress)에 도달했는지 — 도달하면
         // 다음 라운드용 새 스테이지로 전환하거나(마지막 라운드면) 전체 클리어된다.
         const justCleared = !clearedRef.current && isStageCleared(farthestProgressRef.current, stage.goalProgress);
 
-        // 세이브 포인트 통과/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 그
+        // 세이브 포인트 활성화/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 그
         // 프레임에 정렬이 깨져도 "진행했다"는 사실은 항상 인정되어야 한다(스킵).
         // 그 외 구간에서는 기존과 동일하게 매 프레임 정렬을 검사한다.
-        if (justPassedSavePoint || justCleared) {
+        if (justReachedSavePoint || justCleared) {
           if (justCleared) {
             const { round: nextRound, cleared } = roundAfterClear(roundRef.current);
+            // 진행이 멈추는 순간이므로 이어지던 회전 루프음도 함께 끊는다.
+            audio?.stopLoop("rotateLoop");
             if (cleared) {
               // 마지막 라운드(3R) 골 도달 = 전체 클리어 — 스테이지 교체 없이 그대로 둔다.
               clearedRef.current = true;
+              audio?.play("clear");
               onRoundChange?.(roundRef.current, true);
             } else {
               const nextStage = generateStage(seedForRound(DEFAULT_SEED, nextRound));
               loadStage(nextStage);
               stage = nextStage; // ★ 이번 프레임 렌더가 새 스테이지를 참조하도록 재할당(위 let 참고)
               roundRef.current = nextRound;
+              audio?.play("roundUp");
               onRoundChange?.(nextRound, false);
             }
           }
-          // justPassedSavePoint만 true인 경우는 라운드 변화 없이 이번 프레임 정렬 판정만 스킵한다.
+          // justReachedSavePoint만 true인 경우는 라운드 변화 없이 이번 프레임 정렬 판정만 스킵한다.
         } else {
           const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
           const natural = naturalAngle(stage.lightSources, characterRef.current);
@@ -416,6 +474,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
             dyingRef.current = true;
             deathAnimStartRef.current = time;
             deathCountRef.current += 1;
+            // 죽는 순간 이어지던 회전 루프음을 끊고 사망음으로 넘긴다 — 그대로 두면
+            // 죽어서 조작이 멈춘 뒤에도 회전음이 계속 난다.
+            audio?.stopLoop("rotateLoop");
+            audio?.play("death");
             onDeathCountChange?.(deathCountRef.current);
           }
         }
@@ -429,13 +491,31 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
       const natural = naturalAngle(stage.lightSources, characterRef.current);
       const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
+      // 게임플레이가 실제로 진행 중인 동안에만 위험 경고음을 낸다 — 사망 연출·클리어·
+      // 대사창 표시 중에는 그림자를 돌릴 수 없으므로 경고가 의미 없다.
+      const playing = !dyingRef.current && !clearedRef.current && !inputDisabled;
+      if (playing) {
+        const beep = dangerBeepSpec(margin);
+        // 위험할수록 간격이 좁아지고 음량이 커진다 — 2R부터 가이드라인(부채꼴)이
+        // 사라지므로 이 소리가 사실상 유일한 정밀 피드백이 된다.
+        if (beep.active && time - lastDangerBeepAtRef.current >= beep.intervalMs) {
+          lastDangerBeepAtRef.current = time;
+          audio?.play("dangerBeep", { volumeScale: beep.volume });
+        }
+        if (justReturnedToSafety(previousMarginRef.current, margin)) audio?.play("safeReturn");
+      } else {
+        // 조작이 멈춘 상태에서 회전키를 누르고 있었다면 루프음이 그대로 남는다.
+        audio?.stopLoop("rotateLoop");
+      }
+      previousMarginRef.current = margin;
+
       const deathInfo = dyingRef.current
         ? deathFrameInfo(time - deathAnimStartRef.current, DEATH_ANIM_MS, time)
         : undefined;
       const bodyPose: BodyPose = deathInfo ? deathInfo.current : selectBodyPose(margin, isMoving);
       const shadowExpression = selectShadowExpression(margin);
-      // farthestProgressRef는 단조증가이므로, 통과한 세이브 포인트는 이후 계속 true로 유지된다.
-      const checkpointsPassed = stage.checkpointProgress.map((p) => farthestProgressRef.current >= p);
+      // 활성화 상태는 래치라, 한 번 밟은 세이브 포인트는 그 스테이지가 끝날 때까지 유지된다.
+      const checkpointsActivated = checkpointsReachedRef.current;
 
       renderFrame(ctx, stage, sprites, background, {
         characterPos: characterRef.current,
@@ -443,7 +523,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         bodyPose,
         shadowExpression,
         deathInfo,
-        checkpointsPassed,
+        checkpointsActivated,
         round: roundRef.current,
         cleared: clearedRef.current,
         dying: dyingRef.current,
@@ -460,7 +540,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, background]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, background, audioEngineRef]);
 
   return (
     <>
@@ -494,8 +574,8 @@ interface RenderState {
   shadowExpression: ShadowExpression;
   /** 사망 시퀀스 중일 때만 존재 — 프레임 간 크로스페이드·흔들림 연출에 쓴다. */
   deathInfo?: DeathFrameInfo;
-  /** `stage.checkpoints`와 순서·길이가 같은 통과 여부 — 통과한 세이브 포인트를 다른 색으로 표시한다. */
-  checkpointsPassed: boolean[];
+  /** `stage.checkpoints`와 순서·길이가 같은 활성화 여부 — 직접 밟은 세이브 포인트를 다른 색으로 표시한다. */
+  checkpointsActivated: readonly boolean[];
   round: Round;
   cleared: boolean;
   dying: boolean;
@@ -738,7 +818,7 @@ function renderFrame(
     bodyPose,
     shadowExpression,
     deathInfo,
-    checkpointsPassed,
+    checkpointsActivated,
     round,
     cleared,
     dying,
@@ -769,7 +849,7 @@ function renderFrame(
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
   ctx.translate(-camX, -camY);
 
-  drawStage(ctx, stage, background, checkpointsPassed, round);
+  drawStage(ctx, stage, background, checkpointsActivated, round);
 
   // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 이 연분홍
   // (#dcafbe)은 background-art-prompt-guide.md 컬러 팔레트가 "안전구역 경계선

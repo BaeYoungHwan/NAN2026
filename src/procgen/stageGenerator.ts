@@ -24,10 +24,12 @@ const MAX_GENERATION_ATTEMPTS = 200;
 /**
  * 스테이지(라운드) 내부에 두는 세이브 포인트 개수 — 라운드 개수(`core/round.ts`의
  * `MAX_ROUND`)와는 별개의 독립 파라미터다. 라운드마다 독립 스테이지로 전환하는
- * 구조로 바뀌면서, "체크포인트 개수"와 "라운드 개수"가 우연히 같은 값(2)이었을
- * 뿐 서로 다른 개념임을 분리했다.
+ * 구조로 바뀌면서, "체크포인트 개수"와 "라운드 개수"가 서로 다른 개념임을 분리했다.
+ *
+ * 라운드당 1개 — 코스 중간(진행도 50%) 한 곳에만 둔다. 2개였을 때는 세이브
+ * 포인트 간격이 너무 촘촘해 사망 페널티가 거의 사라졌다.
  */
-const SAVE_POINTS_PER_STAGE = 2;
+const SAVE_POINTS_PER_STAGE = 1;
 
 /** 가로등 배치 간격(경로 스텝 기준) — 임시값. 실제 값은 P1 플레이테스트로 확정한다 (PRD §12, ADR-004). */
 const LIGHT_SPACING_STEPS = 8;
@@ -170,9 +172,9 @@ function carveCorridor(grid: TileGrid, start: Cell, rng: () => number): Cell[] {
   return path;
 }
 
-/** 주어진 path 인덱스들이 서로 다른 (col,row) 셀을 가리키는지 확인한다. */
-function hasDistinctCells(path: Cell[], indices: number[]): boolean {
-  const keys = indices.map((i) => `${path[i].col},${path[i].row}`);
+/** 주어진 셀들이 서로 다른 (col,row)인지 확인한다. */
+function hasDistinctCells(cells: Cell[]): boolean {
+  const keys = cells.map((c) => `${c.col},${c.row}`);
   return new Set(keys).size === keys.length;
 }
 
@@ -201,22 +203,26 @@ function isAscendingProgress(checkpointProgress: number[], goalProgress: number)
 interface GenerationAttempt {
   grid: TileGrid;
   path: Cell[];
-  checkpointPathIndices: number[];
+  checkpointCells: Cell[];
   distanceField: Int32Array;
   checkpointProgress: number[];
   goalProgress: number;
 }
 
-/** 한 시드로 그리드·통로·진척도 필드를 한 번에 생성한다 — `generateStage`의 최초 시도와 재시도가 공유. */
+/**
+ * 한 시드로 그리드·통로·진척도 필드를 한 번에 생성한다 — `generateStage`의 최초 시도와 재시도가 공유.
+ * 체크포인트를 스폰→골 최단 경로 위에서 고르므로 `distanceField`·`goalProgress`를 먼저 구한다.
+ */
 function attemptGeneration(seed: number, start: Cell): GenerationAttempt {
   const grid = createEmptyGrid();
   const path = carveCorridor(grid, start, createRng(seed));
-  const checkpointPathIndices = computeCheckpointIndices(path.length);
   const spawnPoint = cellCenter(grid.tileSize, path[0].col, path[0].row);
   const distanceField = bfsDistances(grid, spawnPoint);
-  const checkpointProgress = checkpointPathIndices.map((idx) => cellProgress(grid, distanceField, path[idx]));
-  const goalProgress = cellProgress(grid, distanceField, path[path.length - 1]);
-  return { grid, path, checkpointPathIndices, distanceField, checkpointProgress, goalProgress };
+  const goalCell = path[path.length - 1];
+  const goalProgress = cellProgress(grid, distanceField, goalCell);
+  const checkpointCells = computeCheckpointCells(grid, distanceField, goalCell, goalProgress);
+  const checkpointProgress = checkpointCells.map((cell) => cellProgress(grid, distanceField, cell));
+  return { grid, path, checkpointCells, distanceField, checkpointProgress, goalProgress };
 }
 
 function createEmptyGrid(): TileGrid {
@@ -247,16 +253,15 @@ export function generateStage(seed: number): Stage {
   let attemptResult = attemptGeneration(currentSeed, start);
 
   for (let attempt = 1; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
-    const { path, checkpointPathIndices, checkpointProgress, goalProgress } = attemptResult;
+    const { path, checkpointCells, checkpointProgress, goalProgress } = attemptResult;
     const spawnCell = path[0];
     const goalCell = path[path.length - 1];
     const span = Math.hypot(spawnCell.col - goalCell.col, spawnCell.row - goalCell.row);
-    // carveCorridor는 막다른 곳에서 이미 지나온 셀을 다시 밟을 수 있다(막힌 곳에서
-    // 미방문 후보가 없으면 재방문 허용) — 그 재방문 지점이 하필 체크포인트 인덱스와
-    // 겹치면, path 인덱스는 다른데도 스폰/체크포인트/골의 실제 좌표가 같아지는
-    // 경우가 실측으로 발견됐다(200시드 sweep 중 1건). span 조건과 함께 이 조건도
-    // 만족해야 통과시킨다.
-    const distinctCells = hasDistinctCells(path, [0, ...checkpointPathIndices, path.length - 1]);
+    // 스폰/체크포인트/골의 실제 좌표가 겹치는 스테이지를 걸러낸다 — 예전 carve 순서
+    // 기반 배치에서 막다른 곳의 재방문 셀이 체크포인트 인덱스와 겹치는 사례가
+    // 실측으로 발견됐다(200시드 sweep 중 1건). 최단 경로 기반 배치로 바뀐 뒤에도
+    // 통로가 극단적으로 짧으면 원리적으로 겹칠 수 있어 게이트는 그대로 둔다.
+    const distinctCells = hasDistinctCells([spawnCell, ...checkpointCells, goalCell]);
     const ascendingProgress = isAscendingProgress(checkpointProgress, goalProgress);
     if (span >= MIN_SPAN_CELLS && distinctCells && ascendingProgress) break;
 
@@ -264,11 +269,11 @@ export function generateStage(seed: number): Stage {
     attemptResult = attemptGeneration(currentSeed, start);
   }
 
-  const { grid, path, checkpointPathIndices, distanceField, checkpointProgress, goalProgress } = attemptResult;
+  const { grid, path, checkpointCells, distanceField, checkpointProgress, goalProgress } = attemptResult;
 
   const spawn = cellCenter(grid.tileSize, path[0].col, path[0].row);
   const goal = cellCenter(grid.tileSize, path[path.length - 1].col, path[path.length - 1].row);
-  const checkpoints = checkpointPathIndices.map((idx) => cellCenter(grid.tileSize, path[idx].col, path[idx].row));
+  const checkpoints = checkpointCells.map((cell) => cellCenter(grid.tileSize, cell.col, cell.row));
   const pathPoints = path.map((cell) => cellCenter(grid.tileSize, cell.col, cell.row));
 
   // 광원(가로등)은 통로 경로를 따라 일정 간격으로, 통로 바깥(벽 셀)에 배치한다 —
@@ -282,7 +287,6 @@ export function generateStage(seed: number): Stage {
     grid,
     spawn,
     checkpoints,
-    checkpointPathIndices,
     goal,
     path: pathPoints,
     distanceField,
@@ -374,39 +378,75 @@ function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
 }
 
 /**
- * 통로 경로(`path`, 첫 칸이 스폰·마지막 칸이 골)를 `SAVE_POINTS_PER_STAGE`개
- * 세이브 포인트로 균등 분할한다 — 체크포인트 "배치" 인덱스로, `generateStage`가
- * 이 인덱스의 좌표를 `checkpoints`로, BFS 진행도를 `checkpointProgress`로 변환해
- * 런타임 리스폰 판정(`core/round.ts`의 `respawnPointFor`)에 쓴다. 스폰·골과
- * 겹치지 않도록 인덱스를 [1, path.length - 2] 범위로 고정한다.
- *
- * 보장 범위: `path.length >= SAVE_POINTS_PER_STAGE + 2`(현재 4칸 이상)일 때만
- * 모든 체크포인트가 서로/스폰/골과 겹치지 않음을 보장한다. 그보다 짧은 경로는
- * 스폰·골 사이 정수 인덱스 칸이 부족해(예: 3칸이면 내부 칸이 1개뿐) 원리적으로
- * 겹침을 막을 수 없다 — `generateStage`의 `MIN_SPAN_CELLS` 재시도 게이트가 이런
- * 짧은 경로를 걸러내는 1차 방어선이므로, 여기서는 더 정교하게 처리하지 않는다.
- *
- * `computeCheckpoints`(좌표 변환)와 체크포인트 "배치" 자체가 같은 인덱스를
- * 공유하도록 인덱스 계산 자체는 이 함수로 분리해뒀다.
+ * `distanceField`를 골에서 역추적해 스폰→골 **최단 경로** 셀 목록을 만든다
+ * (스폰이 첫 칸, 골이 마지막 칸). 각 스텝에서 진행도가 정확히 1 작은 이웃으로
+ * 내려가며, 이웃 탐색 순서가 고정이라 최단 경로가 여럿이어도 결정론적으로 하나를 고른다.
  */
-export function computeCheckpointIndices(pathLength: number): number[] {
-  const indices: number[] = [];
-  const maxIdx = pathLength - 2;
-  let lastIdx = 0; // 스폰 인덱스(0)보다 커야 함
+function shortestPathCells(grid: TileGrid, distanceField: Int32Array, goalCell: Cell): Cell[] {
+  const cells: Cell[] = [{ ...goalCell }];
+  let { col, row } = goalCell;
+  let distance = cellProgress(grid, distanceField, goalCell);
 
-  for (let i = 1; i <= SAVE_POINTS_PER_STAGE; i++) {
-    const fraction = i / (SAVE_POINTS_PER_STAGE + 1);
-    const raw = Math.min(maxIdx, Math.max(1, Math.round((pathLength - 1) * fraction)));
-    // 경로가 짧아 raw가 이전 체크포인트와 같거나 앞서면 다음 유효 인덱스로 밀어내
-    // 체크포인트끼리, 그리고 스폰과 겹치지 않게 한다.
-    const idx = Math.min(Math.max(raw, lastIdx + 1), maxIdx);
-    lastIdx = idx;
-    indices.push(idx);
+  while (distance > 0) {
+    const next = DIRECTIONS.find(([dc, dr]) => {
+      const nc = col + dc;
+      const nr = row + dr;
+      if (nc < 0 || nc >= grid.cols || nr < 0 || nr >= grid.rows) return false;
+      return distanceField[nr * grid.cols + nc] === distance - 1;
+    });
+    // 골이 스폰과 연결돼 있으면(항상 그렇다 — 같은 carve 경로 위다) 반드시 찾는다.
+    if (!next) break;
+    col += next[0];
+    row += next[1];
+    distance -= 1;
+    cells.push({ col, row });
   }
 
-  return indices;
+  return cells.reverse();
 }
 
-export function computeCheckpoints(tileSize: number, path: Cell[]): Point[] {
-  return computeCheckpointIndices(path.length).map((idx) => cellCenter(tileSize, path[idx].col, path[idx].row));
+/**
+ * 세이브 포인트를 놓을 셀을 `SAVE_POINTS_PER_STAGE`개 고른다 — `generateStage`가
+ * 이 셀의 중심 좌표를 `checkpoints`로 변환해 런타임 접촉 판정(`core/round.ts`의
+ * `hasTouchedCheckpoint`)에 쓴다.
+ *
+ * 후보는 **스폰→골 최단 경로 위 셀**로 제한하고, 그중 진행도를 균등 분할한
+ * 지점(1개면 정확히 절반)에 가장 가까운 셀을 고른다. 두 가지를 동시에 만족시키기
+ * 위한 선택이다.
+ *
+ * - **길목에 놓이게** — 후보를 `path`(carve 순서 전체) 위로 두면 세이브 포인트가
+ *   막다른 갈래나 되돌아가는 구간에 놓여, 플레이어가 일부러 찾아가지 않는 한
+ *   마주칠 일이 없었다(실측: 2R·3R의 최단 경로가 체크포인트를 지나지 않음).
+ *   최단 경로 위에 두면 평범하게 골로 향하는 길에 자연스럽게 놓인다. 접촉 반경이
+ *   통로 폭의 절반이라 비켜 갈 여지는 남아 있어, 밟을지 말지는 여전히 플레이어 선택이다.
+ * - **코스 중간에 놓이게** — 진행도(BFS 거리)는 골 판정과 같은 척도라, 이 축으로
+ *   분할해야 "코스의 절반"이 체감상으로도 절반이 된다. carve 순서로 나누면 통로 폭
+ *   2칸 때문에 서로 다른 carve 구간이 벽 없이 인접·병합되면서 스테이지 초반에
+ *   몰렸다(실측: 골 진행도가 22인 1R에서 체크포인트 진행도가 3, 5 — 스폰에서
+ *   다섯 걸음이면 둘 다 지나친 위치였다).
+ *
+ * 최단 경로 셀의 진행도는 0부터 `goalProgress`까지 1씩 빠짐없이 나타나므로, 어떤
+ * 분할 목표값이든 항상 가장 가까운 후보를 찾을 수 있다. 스폰(진행도 0)·골
+ * (`goalProgress`)과 겹치지 않도록 양 끝은 후보에서 제외한다 — 경로가 극단적으로
+ * 짧아 내부 칸이 없는 경우만 겹칠 수 있고, 그건 `generateStage`의 `MIN_SPAN_CELLS`
+ * 재시도 게이트가 걸러낸다.
+ */
+export function computeCheckpointCells(
+  grid: TileGrid,
+  distanceField: Int32Array,
+  goalCell: Cell,
+  goalProgress: number,
+): Cell[] {
+  const route = shortestPathCells(grid, distanceField, goalCell);
+  const candidates = route.slice(1, -1); // 스폰·골 제외
+  if (candidates.length === 0) return [];
+
+  return Array.from({ length: SAVE_POINTS_PER_STAGE }, (_, i) => {
+    const target = (goalProgress * (i + 1)) / (SAVE_POINTS_PER_STAGE + 1);
+    return candidates.reduce((best, cell) => {
+      const diff = Math.abs(cellProgress(grid, distanceField, cell) - target);
+      const bestDiff = Math.abs(cellProgress(grid, distanceField, best) - target);
+      return diff < bestDiff ? cell : best;
+    });
+  });
 }
