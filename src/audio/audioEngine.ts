@@ -83,18 +83,14 @@ export class AudioEngine {
   }
 
   /**
-   * 브라우저 autoplay 정책 때문에 AudioContext는 사용자 제스처 전까지 suspended다.
-   * 첫 입력 시 한 번 호출해 깨운다 — 이미 running이면 아무 일도 하지 않는다.
+   * autoplay 잠금이 풀린 직후 호출된다 — 잠겨 있는 동안 거부됐던 BGM 재생을 다시 밀어준다.
+   *
+   * 컨텍스트를 깨우는 일(resume) 자체는 여기서 하지 않는다. 엔진은 효과음 디코딩이
+   * 끝나야 만들어지는데 첫 사용자 입력은 그보다 먼저 오는 것이 보통이라, 잠금 해제를
+   * 엔진에 맡기면 그 입력을 놓친다 — 컨텍스트를 소유한 `useAudio`가 담당한다.
    */
-  async unlock(): Promise<void> {
-    if (this.context.state === "suspended") {
-      try {
-        await this.context.resume();
-      } catch {
-        // 제스처로 인정되지 않은 경우 — 다음 입력에서 다시 시도된다.
-      }
-    }
-    // unlock 이전에 재생을 시도했던 BGM은 브라우저가 막았을 수 있으므로 다시 밀어준다.
+  resumeBgm(): void {
+    if (this.disposed) return;
     this.activeBgm?.element.play().catch(() => {});
   }
 

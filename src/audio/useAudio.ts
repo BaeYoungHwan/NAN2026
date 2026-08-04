@@ -46,6 +46,9 @@ function readStoredMute(): boolean {
  */
 export function useAudio(): GameAudio {
   const engineRef = useRef<AudioEngine | null>(null);
+  // 컨텍스트를 엔진과 별도로 들고 있는다 — 엔진은 효과음 디코딩이 끝나야 만들어지지만,
+  // autoplay 잠금 해제는 그보다 먼저 오는 첫 입력에서 이미 처리해야 하기 때문이다.
+  const contextRef = useRef<AudioContext | null>(null);
   const [muted, setMuted] = useState(readStoredMute);
   const [ready, setReady] = useState(false);
 
@@ -61,6 +64,7 @@ export function useAudio(): GameAudio {
     }
 
     const activeContext = context;
+    contextRef.current = activeContext;
     // StrictMode는 마운트를 두 번 실행한다 — 첫 cleanup에서 컨텍스트를 닫은 뒤, 그때
     // 아직 진행 중이던 loadSfxBuffers가 나중에 resolve되면서 같은 컨텍스트를 또 닫으려
     // 한다. 이미 닫힌 AudioContext의 close()는 reject되므로, 한 번만 닫도록 잠근다.
@@ -89,21 +93,38 @@ export function useAudio(): GameAudio {
       setReady(false);
       engineRef.current?.dispose();
       engineRef.current = null;
+      contextRef.current = null;
       closeContext();
     };
   }, []);
 
-  // 브라우저는 사용자 제스처 전까지 AudioContext를 suspended로 둔다. 오프닝 컷신을
-  // Enter/클릭으로 넘기는 흐름이 사실상 첫 제스처지만, 거기에만 의존하면 진입 경로가
-  // 바뀔 때 조용히 깨진다 — window 레벨에서 첫 입력을 한 번만 받아 깨운다.
+  /**
+   * 브라우저는 사용자 제스처 전까지 AudioContext를 suspended로 둔다. window 레벨에서
+   * 모든 입력을 받아 깨운다.
+   *
+   * **첫 입력 한 번만 처리하고 리스너를 떼면 안 된다.** 플레이어는 페이지가 뜨자마자
+   * 오프닝 컷신을 넘기려고 Enter를 누르는데, 그 시점에는 효과음 디코딩이 아직 끝나지
+   * 않아 컨텍스트가 준비되기도 전일 수 있다. 그 한 번으로 기회를 소진해 버리면 이후
+   * 컨텍스트가 영영 suspended로 남아 소리가 전혀 나지 않는다(느린 기기·첫 로드에서
+   * 실제로 발생하는 조건이다). 그래서 잠금이 실제로 풀릴 때까지 리스너를 유지하고,
+   * 이미 풀린 뒤에는 상태 확인 한 번으로 즉시 빠져나온다.
+   */
   useEffect(() => {
-    let unlocked = false;
     const unlock = () => {
-      if (unlocked) return;
-      unlocked = true;
-      void engineRef.current?.unlock();
-      window.removeEventListener("keydown", unlock);
-      window.removeEventListener("pointerdown", unlock);
+      const context = contextRef.current;
+      // 컨텍스트가 아직 없으면(초기화 전이거나 WebAudio 미지원) 다음 입력에서 다시 본다.
+      if (!context || context.state !== "suspended") return;
+
+      context
+        .resume()
+        .then(() => {
+          // 잠금 때문에 재생이 거부됐던 BGM을 다시 밀어준다. 엔진이 아직 없으면
+          // 준비 완료 시점의 `ready` 갱신이 BGM 재생을 다시 걸어준다.
+          engineRef.current?.resumeBgm();
+        })
+        .catch(() => {
+          // 제스처로 인정되지 않은 경우 — 리스너가 살아 있으므로 다음 입력에서 재시도된다.
+        });
     };
 
     window.addEventListener("keydown", unlock);
