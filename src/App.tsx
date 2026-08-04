@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Round } from "./core/round";
+import { debugRoundFromQuery } from "./core/debugRound";
 import { ENDING_SLIDES, OPENING_SLIDES } from "./content/cutsceneSlides";
 import { DEATH_LINES, pickRandomLine, ROUND_ADVANCE_LINES, TUTORIAL_LINES } from "./content/reaperLines";
 import CutsceneSlide from "./ui/CutsceneSlide";
@@ -13,7 +14,7 @@ const DEATH_LINE_AUTO_DISMISS_MS = 1500;
 
 function App() {
   const [deathCount, setDeathCount] = useState(0);
-  const [round, setRound] = useState<Round>(1);
+  const [round, setRound] = useState<Round>(debugRoundFromQuery);
   const [dialogueQueue, setDialogueQueue] = useState<string[]>([]);
   const [dialogueAutoDismissMs, setDialogueAutoDismissMs] = useState<number | undefined>(undefined);
   const [showOpening, setShowOpening] = useState(true);
