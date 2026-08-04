@@ -268,6 +268,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   useImperativeHandle(
     ref,
     () => ({
+      // ?round= 디버그 진입점과 무관하게 항상 1R부터 다시 시작한다 — "재시작"은
+      // 게임을 처음부터 다시 플레이한다는 의미이지, 프리뷰 중이던 라운드로
+      // 돌아오는 버튼이 아니다. ?round=2/3으로 들어와 프리뷰하다 재시작을 누르면
+      // 1R로 넘어가는 게 의도된 동작이다.
       restart: () => {
         loadStage(generateStage(DEFAULT_SEED));
         roundRef.current = 1;

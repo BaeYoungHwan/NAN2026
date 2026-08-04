@@ -1,67 +1,37 @@
 import type { Stage } from "../core/stage";
 
 /**
- * 스테이지 배경과 지형(벽 셀)·골 지점을 그린다. 배경은 라운드별 정적 아트
- * (`backgroundArt.ts`)이고, 벽은 시드마다 통로 모양이 달라지는 절차적 타일이라
- * 배경 그림과 픽셀 단위로 맞지 않는다 — 그래서 벽을 불투명 사각형이 아니라
- * "그림자 세계의 경계"처럼 보이는 반투명 오버레이로 그려, 배경과 정확히 겹치지
- * 않아도 위화감이 적게 만든다. 배경 이미지가 없으면(로드 실패·미확보) 기존
- * 단색 배경으로 폴백한다.
+ * `#rrggbb` 헥스 문자열을 `"r, g, b"` 콤마 구분 문자열로 변환한다 —
+ * `rgba(${...}, alpha)` 템플릿에 그대로 끼워 넣기 위함. 촛불 색을 hex 하나로만
+ * 받고 여기서 rgb를 파생시켜, 두 표현을 따로 넘기다 하나만 바뀌어 어긋나는
+ * 실수를 구조적으로 막는다.
  */
-export function drawStage(
-  ctx: CanvasRenderingContext2D,
-  stage: Stage,
-  background: HTMLImageElement | null,
-  checkpointsPassed: readonly boolean[],
-): void {
+function hexToRgbString(hex: string): string {
+  const value = parseInt(hex.slice(1), 16);
+  return `${(value >> 16) & 0xff}, ${(value >> 8) & 0xff}, ${value & 0xff}`;
+}
+
+/**
+ * 벽 채우기+AO+베벨 레이어를 오프스크린 캔버스 한 장에 미리 그려둔다. 이 그리드는
+ * 라운드 전환 전까지 절대 바뀌지 않는데, 이 계산(300셀 순회 3회 + Path2D 생성)을
+ * 매 프레임(rAF, ~60fps) 다시 하고 있었다 — `GameCanvas.tsx`의 `colliderCacheRef`가
+ * 이미 쓰고 있는 "stage 참조가 바뀔 때만 재계산" 패턴을 여기도 맞춘다. `stage`
+ * 객체별로 캐싱하므로(WeakMap) 라운드가 바뀌어 새 Stage가 만들어지면 자동으로
+ * 새로 그려지고, 이전 캔버스는 참조가 끊겨 GC된다.
+ */
+const wallLayerCache = new WeakMap<Stage, HTMLCanvasElement>();
+
+function buildWallLayer(stage: Stage): HTMLCanvasElement {
   const { grid } = stage;
   const mapWidth = grid.cols * grid.tileSize;
   const mapHeight = grid.rows * grid.tileSize;
 
-  if (background) {
-    ctx.drawImage(background, 0, 0, mapWidth, mapHeight);
-  } else {
-    ctx.fillStyle = "#111";
-    ctx.fillRect(0, 0, mapWidth, mapHeight);
-  }
+  const layer = document.createElement("canvas");
+  layer.width = mapWidth;
+  layer.height = mapHeight;
+  const ctx = layer.getContext("2d");
+  if (!ctx) return layer;
 
-  // 배경 프롬프트 가이드가 요구한 대로 배경 그림 자체는 전체 화면에 균일하게
-  // 밝은 바닥 텍스처만 담고 있어(직접 구운 그림자·명암 없음), 이 위에 앰비언트
-  // 어둠을 깔아주는 건 전적으로 엔진(이 코드) 몫이다. 이 어둠이 없으면 광원이
-  // 그려내는 빛 웅덩이가 이미 밝은 바닥과 명도 차이가 거의 없어 안 보이고,
-  // 배경 가이드가 의도한 "빛 웅덩이 사이 어두운 틈"도 사라진다. 광원(GameCanvas)은
-  // 이 위에 나중에 그려지므로 자연히 어둠을 뚫고 밝게 도드라진다.
-  //
-  // 이전엔 이 어둠이 rgba 한 값짜리 완전 균일한 판이라 밋밋했다 — 위(하늘 쪽)는
-  // 저녁 하늘처럼 차가운 남보라 톤이 살짝 돌고 아래(땅에 가까울수록)는 그림자가
-  // 고이듯 더 짙어지는 세로 그라디언트로 깊이감을 준다. 그 위에 맵 중심에서
-  // 가장자리로 갈수록 짙어지는 비네트를 한 겹 더 얹어, 통로 구석이 화면 프레임처럼
-  // 딱 잘리지 않고 자연스럽게 어둠 속으로 스며들게 한다.
-  const dusk = ctx.createLinearGradient(0, 0, 0, mapHeight);
-  dusk.addColorStop(0, "rgba(24, 18, 36, 0.6)");
-  dusk.addColorStop(0.55, "rgba(12, 9, 18, 0.55)");
-  dusk.addColorStop(1, "rgba(5, 4, 8, 0.62)");
-  ctx.fillStyle = dusk;
-  ctx.fillRect(0, 0, mapWidth, mapHeight);
-
-  const vignette = ctx.createRadialGradient(
-    mapWidth / 2,
-    mapHeight / 2,
-    mapHeight * 0.25,
-    mapWidth / 2,
-    mapHeight / 2,
-    mapHeight * 0.75,
-  );
-  vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
-  vignette.addColorStop(1, "rgba(0, 0, 0, 0.4)");
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, mapWidth, mapHeight);
-
-  // 셀마다 strokeRect로 테두리를 그리면 인접한 벽 셀 사이에도 선이 남아 통로
-  // 모양이 아니라 "40px 그리드 그 자체"가 보여버린다 — 배경의 유기적인 바닥
-  // 사진과 정면으로 충돌하는 지점. 채우기는 인접 셀끼리 이어붙여 하나의 덩어리로
-  // 두고, 테두리는 실제로 통로와 맞닿는 바깥 경계 변에만(= 미로의 진짜 윤곽선)
-  // 부드럽게 번지는 보라 글로우로 그려 "그림자 세계의 경계"에 더 가깝게 만든다.
   const isWall = (row: number, col: number): boolean => {
     if (row < 0 || row >= grid.rows || col < 0 || col >= grid.cols) return true;
     return grid.cells[row * grid.cols + col] === 1;
@@ -145,6 +115,76 @@ export function drawStage(
   traceBoundary();
   ctx.restore();
 
+  return layer;
+}
+
+/**
+ * 스테이지 배경과 지형(벽 셀)·골 지점을 그린다. 배경은 라운드별 정적 아트
+ * (`backgroundArt.ts`)이고, 벽은 시드마다 통로 모양이 달라지는 절차적 타일이라
+ * 배경 그림과 픽셀 단위로 맞지 않는다 — 그래서 벽을 불투명 사각형이 아니라
+ * "그림자 세계의 경계"처럼 보이는 반투명 오버레이로 그려, 배경과 정확히 겹치지
+ * 않아도 위화감이 적게 만든다. 배경 이미지가 없으면(로드 실패·미확보) 기존
+ * 단색 배경으로 폴백한다.
+ */
+export function drawStage(
+  ctx: CanvasRenderingContext2D,
+  stage: Stage,
+  background: HTMLImageElement | null,
+  checkpointsPassed: readonly boolean[],
+): void {
+  const { grid } = stage;
+  const mapWidth = grid.cols * grid.tileSize;
+  const mapHeight = grid.rows * grid.tileSize;
+
+  if (background) {
+    ctx.drawImage(background, 0, 0, mapWidth, mapHeight);
+  } else {
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, mapWidth, mapHeight);
+  }
+
+  // 배경 프롬프트 가이드가 요구한 대로 배경 그림 자체는 전체 화면에 균일하게
+  // 밝은 바닥 텍스처만 담고 있어(직접 구운 그림자·명암 없음), 이 위에 앰비언트
+  // 어둠을 깔아주는 건 전적으로 엔진(이 코드) 몫이다. 이 어둠이 없으면 광원이
+  // 그려내는 빛 웅덩이가 이미 밝은 바닥과 명도 차이가 거의 없어 안 보이고,
+  // 배경 가이드가 의도한 "빛 웅덩이 사이 어두운 틈"도 사라진다. 광원(GameCanvas)은
+  // 이 위에 나중에 그려지므로 자연히 어둠을 뚫고 밝게 도드라진다.
+  //
+  // 이전엔 이 어둠이 rgba 한 값짜리 완전 균일한 판이라 밋밋했다 — 위(하늘 쪽)는
+  // 저녁 하늘처럼 차가운 남보라 톤이 살짝 돌고 아래(땅에 가까울수록)는 그림자가
+  // 고이듯 더 짙어지는 세로 그라디언트로 깊이감을 준다. 그 위에 맵 중심에서
+  // 가장자리로 갈수록 짙어지는 비네트를 한 겹 더 얹어, 통로 구석이 화면 프레임처럼
+  // 딱 잘리지 않고 자연스럽게 어둠 속으로 스며들게 한다.
+  const dusk = ctx.createLinearGradient(0, 0, 0, mapHeight);
+  dusk.addColorStop(0, "rgba(24, 18, 36, 0.6)");
+  dusk.addColorStop(0.55, "rgba(12, 9, 18, 0.55)");
+  dusk.addColorStop(1, "rgba(5, 4, 8, 0.62)");
+  ctx.fillStyle = dusk;
+  ctx.fillRect(0, 0, mapWidth, mapHeight);
+
+  const vignette = ctx.createRadialGradient(
+    mapWidth / 2,
+    mapHeight / 2,
+    mapHeight * 0.25,
+    mapWidth / 2,
+    mapHeight / 2,
+    mapHeight * 0.75,
+  );
+  vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+  vignette.addColorStop(1, "rgba(0, 0, 0, 0.4)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, mapWidth, mapHeight);
+
+  // 벽 채우기+AO+베벨은 stage가 바뀌기 전까지 절대 안 변하는 정적 레이어라
+  // buildWallLayer()가 오프스크린 캔버스에 미리 그려둔 걸 매 프레임 한 번의
+  // drawImage로만 합성한다(파일 상단 wallLayerCache 주석 참고).
+  let wallLayer = wallLayerCache.get(stage);
+  if (!wallLayer) {
+    wallLayer = buildWallLayer(stage);
+    wallLayerCache.set(stage, wallLayer);
+  }
+  ctx.drawImage(wallLayer, 0, 0);
+
   // 세이브 포인트·골을 "제단 촛불"로 그린다 — 광원(육각 랜턴, 기하학적·서 있는
   // 기둥형)과 실루엣이 겹치면 둘을 헷갈리게 되므로, 촛불은 각진 형태 없이 둥근
   // 받침 위에 유기적인 불꽃 하나만 두어 "잠시 쉬어가는 지점"이라는 성격을
@@ -159,7 +199,8 @@ export function drawStage(
     return v - Math.floor(v);
   };
 
-  const drawCandleMark = (x: number, y: number, color: string, rgb: string): void => {
+  const drawCandleMark = (x: number, y: number, color: string): void => {
+    const rgb = hexToRgbString(color);
     const glow = `rgba(${rgb}, 0.9)`;
     const lean = (wobble(x * 3.1 + y * 7.7) - 0.5) * 3;
 
@@ -266,11 +307,9 @@ export function drawStage(
 
   stage.checkpoints.forEach((checkpoint, i) => {
     const passed = checkpointsPassed[i] ?? false;
-    const color = passed ? "#4caf50" : "#f0e6d2";
-    const rgb = passed ? "76, 175, 80" : "240, 230, 210";
-    drawCandleMark(checkpoint.x, checkpoint.y, color, rgb);
+    drawCandleMark(checkpoint.x, checkpoint.y, passed ? "#4caf50" : "#f0e6d2");
   });
 
-  drawCandleMark(stage.goal.x, stage.goal.y, "#f5a623", "245, 166, 35");
+  drawCandleMark(stage.goal.x, stage.goal.y, "#f5a623");
   ctx.shadowBlur = 0;
 }
