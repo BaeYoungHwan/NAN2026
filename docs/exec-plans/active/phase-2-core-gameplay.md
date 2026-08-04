@@ -20,7 +20,7 @@
 - [ ] 그림자 길이(ℓ)·회전 속도·허용 각도 실제 값 확정 (임시값: 80px, 180도/초, ±30도)
 - [ ] 통로 폭·길이·최소 스폰-골 거리 실제 값 확정 (2026-07-28 Jump King식 난이도 실험으로 40스텝→80스텝, 최소 10셀→16셀로 1차 조정 완료 — `docs/design-docs/adr/ADR-003-procgen-corridor-collision.md`, 최종 확정은 플레이테스트로)
 - [ ] 장애물 그림자 occlusion 기믹 추가 여부 — MVP 제외 권장, 최종 확정 필요
-- [x] 게임 제목 확정 — **「돌려돌려 그림자」** (2026-08-04 확정). 가제 "Shadow-Step"을 대체. 문서 11곳 반영 완료(README, index.html `<title>`, CLAUDE.md, PRD-v1, game-intro, ai-usage-report, architecture-v1, shadow-mechanic-diagram, design-docs/index, ADR-001). npm 패키지명(`package.json`의 `shadow-step`)과 완료된 exec-plan·`shadow-step.md`(초기화 양식 원본)는 역사 기록·영문 슬러그로 의도적 유지
+- [x] 게임 제목 확정 — **「돌려돌려 그림자」** (2026-08-04 확정). 가제 "Shadow-Step"을 대체. 문서 11곳 반영 완료(README, index.html `<title>`, CLAUDE.md, PRD-v1, game-intro, ai-usage-report, architecture-v1, shadow-mechanic-diagram, design-docs/index, background-art-prompt-guide, ADR-001). npm 패키지명(`package.json`의 `shadow-step`)과 완료된 exec-plan·`shadow-step.md`(초기화 양식 원본)는 역사 기록·영문 슬러그로 의도적 유지
 - [ ] 3R 디메리트 수치 확정 (임시값: 허용 각도 배율 0.5, `src/core/round.ts`)
 
 ### B. 맵 디자인 확정 및 절차적 생성 전환
@@ -48,8 +48,8 @@
 - [x] README에 제출물 5종 현황 표 추가 (2026-08-03) — 스크린샷/GIF는 맵 디자인 확정 후 다시 촬영해야 해서 보류(§B 완료 후 진행)
 - [ ] 플레이 가능 빌드 (GitHub Pages — 배포 완료, PRD 미결 사항 확정 후 최종 밸런스 반영 필요)
 - [ ] 플레이 영상 (유튜브 공개 업로드 + 링크만 제출 — [[project-submission-video-hosting]])
-- [ ] 게임소개 PDF — `docs/product-specs/game-intro.md` 초안 작성됨. 남은 작업: 게임 제목 확정, 플레이 영상 링크, 스크린샷(맵 확정 후), PDF 변환
-- [ ] AI활용기술문서 PDF — `docs/product-specs/ai-usage-report.md` 초안 작성됨(배영환 파트). 남은 작업: 게임 제목 확정 후 표지 갱신, 원호님 파트(콘텐츠/QA AI 활용) 보강, 스크린샷 첨부, PDF 변환
+- [ ] 게임소개 PDF — `docs/product-specs/game-intro.md` 초안 작성됨. 남은 작업: 플레이 영상 링크, 스크린샷(맵 확정 후), PDF 변환
+- [ ] AI활용기술문서 PDF — `docs/product-specs/ai-usage-report.md` 초안 작성됨(배영환 파트). 남은 작업: 원호님 파트(콘텐츠/QA AI 활용) 보강, 스크린샷 첨부, PDF 변환
 - [ ] 팀원 롤 기술서 PDF — `docs/product-specs/team-roles.md` 초안 작성됨(배영환 파트 완료, 송원호 파트는 커밋 로그 기반 초안만 — 본인 작성 필요)
 
 ## 검증 기준
