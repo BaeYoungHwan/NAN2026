@@ -1,4 +1,4 @@
-import type { Stage } from "../core/stage";
+import type { Point, Stage } from "../core/stage";
 import { ROUND_BACKGROUND_BRIGHTNESS, type Round } from "../core/round";
 
 /**
@@ -53,6 +53,259 @@ function buildAtmosphere(
 }
 
 /**
+ * 바닥 배경(`stage.png`)이 맵 전체에 사진 한 장으로 통째로 늘어나 있어(타일링
+ * 없음), 통로가 어디로 꺾이든 항상 같은 느낌이라 밋밋하다는 피드백 — 실사 타일
+ * 이미지를 새로 뽑기 전까지(tile-art-prompt-guide.md 참고), 코드만으로 "닳은
+ * 콘크리트" 특유의 미세한 알갱이(grain)를 얹어 질감을 보강한다. 결정론적 해시로
+ * 고정된 반점 배치를 그리므로 프레임마다 위치가 흔들리지 않는다. 맵 크기(800×600)가
+ * `GRID_COLS`/`GRID_ROWS`/`TILE_SIZE`로 항상 고정이라 stage와 무관하게 한 번만
+ * 그려 재사용한다(크기가 바뀌는 경우를 대비해 방어적으로 재생성 체크는 한다).
+ */
+let floorGrainLayer: HTMLCanvasElement | null = null;
+
+function grainHash(n: number): number {
+  const v = Math.sin(n * 12.9898) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+/**
+ * 광원 발치의 얕은 웅덩이 — 재질 디테일(판석·접지 그림자)만으로는 여전히
+ * 밋밋하다는 지적이라, 재질이 아니라 조명과 상호작용하는 요소를 하나 더한다.
+ * `drawStage`가 아니라 GameCanvas의 광원 루프에서, 그 램프의 빛 웅덩이
+ * 그라디언트를 그린 "직후"에 호출해야 한다 — `drawStage` 안에서 그렸더니
+ * GameCanvas가 이후에 훨씬 강한 빛 웅덩이를 그 위에 덧그려서 완전히 덮여
+ * 안 보였다(실측 확인). 광원마다 절반 정도만(성기게) 나타나게 해 모든 램프
+ * 발치가 똑같이 반복되는 패턴으로 안 보이게 한다.
+ */
+export function drawPuddleReflection(ctx: CanvasRenderingContext2D, light: Point, index: number, glowRgb: string): void {
+  const seed = light.x * 7.13 + light.y * 3.71 + index * 19.1;
+  if (grainHash(seed) < 0.45) return;
+
+  const px = light.x + (grainHash(seed + 1) - 0.5) * 26;
+  const py = light.y + 16 + grainHash(seed + 2) * 8;
+  const rw = 11 + grainHash(seed + 3) * 7;
+  const rh = rw * 0.4;
+
+  // 웅덩이 자체(젖은 바닥)를 램프 색과 같은 색조의 반투명 웜(wash)만으로
+  // 표현하면 이미 그 자리를 덮고 있는 빛 웅덩이 그라디언트와 색조가 거의
+  // 같아서 눈에 안 띈다(실측 확인) — 어두운 테두리로 웅덩이의 "모양" 자체를
+  // 분리해서 보여준 다음, 램프 색과 대비되는 밝은 흰빛 하이라이트(반사광
+  // 특유의 반짝임)로 시선을 끈다.
+  ctx.strokeStyle = "rgba(10, 9, 7, 0.4)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(px, py, rw, rh, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(15, 13, 10, 0.22)";
+  ctx.fill();
+
+  const wash = ctx.createRadialGradient(px, py, 0, px, py, rw * 0.85);
+  wash.addColorStop(0, `rgba(${glowRgb}, 0.22)`);
+  wash.addColorStop(1, `rgba(${glowRgb}, 0)`);
+  ctx.fillStyle = wash;
+  ctx.beginPath();
+  ctx.ellipse(px, py, rw * 0.85, rh * 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const hx = px + (grainHash(seed + 4) - 0.5) * rw * 0.5;
+  const hy = py - rh * 0.25;
+  const highlight = ctx.createRadialGradient(hx, hy, 0, hx, hy, rw * 0.4);
+  highlight.addColorStop(0, "rgba(255, 246, 220, 0.65)");
+  highlight.addColorStop(1, "rgba(255, 246, 220, 0)");
+  ctx.fillStyle = highlight;
+  ctx.beginPath();
+  ctx.ellipse(hx, hy, rw * 0.4, rh * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * 두 점을 잇는 직선 대신, 수직 방향으로 살짝(±1.5px) 흔들리는 꺾인 선을 그린다 —
+ * 판석 이음매가 자로 그은 듯 완벽히 곧으면 오히려 "무늬"처럼 보여 바닥사진과
+ * 어긋난다. seed가 같으면 항상 같은 흔들림을 재현한다(결정론적).
+ */
+function strokeJitteredLine(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, seed: number): void {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const SEGMENTS = 5;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  for (let s = 1; s <= SEGMENTS; s++) {
+    const t = s / SEGMENTS;
+    const jitter = (grainHash(seed + s * 3.77) - 0.5) * 3;
+    ctx.lineTo(x1 + dx * t + nx * jitter, y1 + dy * t + ny * jitter);
+  }
+  ctx.stroke();
+}
+
+/**
+ * 큰 스케일의 불규칙 판석(flagstone) — 반점·얼룩·실금은 전부 "노이즈"라 아무리
+ * 겹쳐도 결국 균일한 잡음으로 읽혀 여전히 밋밋하다는 피드백(사용자 지적).
+ * 이건 노이즈가 아니라 구조다: 벽돌쌓기처럼 행마다 어긋나는 큰 판석 격자를
+ * 잡고, (1) 판석마다 서로 다른 톤 + 은은한 중심 볼록감(bulge)을 깔아 "낱장
+ * 돌판을 이어붙인 바닥"이라는 재질감을 만든 다음, (2) 그 경계를 살짝
+ * 흔들리는 선(어두운 홈 + 밝은 rim 1px)으로 그어 이음매를 드러낸다 — 벽의
+ * 베벨+AO 쌍과 같은 시각 언어를 재사용해 게임 전체 톤과 일관된다.
+ */
+function buildPavingSeams(ctx: CanvasRenderingContext2D, mapWidth: number, mapHeight: number): void {
+  const rowYs: number[] = [0];
+  let y = 0;
+  let ri = 0;
+  while (y < mapHeight) {
+    y += 85 + grainHash(ri * 41.7 + 300) * 55;
+    rowYs.push(Math.min(y, mapHeight));
+    ri++;
+  }
+
+  // 행마다 열 경계를 미리 계산해 채우기·이음매 두 패스가 같은 격자를 쓰게 한다
+  // (따로 계산하면 해시 시퀀스가 어긋나 채우기와 선이 안 맞을 위험이 있다).
+  const rowCols: number[][] = [];
+  for (let r = 0; r < rowYs.length - 1; r++) {
+    const cols = [-(grainHash(r * 19.3 + 500) * 100)];
+    let x = cols[0];
+    let ci = 0;
+    while (x < mapWidth) {
+      x += 80 + grainHash(r * 31.1 + ci * 13.7 + 501) * 60;
+      cols.push(x);
+      ci++;
+    }
+    rowCols.push(cols);
+  }
+
+  // (1) 판석별 톤 차이 + 중심 볼록감 — 각 판석을 살짝 다른 밝기로 채우고,
+  // 중심에 은은한 밝은 그라디언트를 얹어 평평한 색면이 아니라 미세하게
+  // 볼록한 돌판처럼 보이게 한다.
+  for (let r = 0; r < rowCols.length; r++) {
+    const top = rowYs[r];
+    const bottom = rowYs[r + 1];
+    const cols = rowCols[r];
+    for (let c = 0; c < cols.length - 1; c++) {
+      const left = Math.max(0, cols[c]);
+      const right = Math.min(mapWidth, cols[c + 1]);
+      if (right <= left) continue;
+      const seed = r * 97.3 + c * 13.1 + 600;
+      const isDark = grainHash(seed) < 0.5;
+      const alpha = 0.03 + grainHash(seed + 1) * 0.06;
+      const tone = isDark ? "50, 44, 36" : "170, 158, 138";
+      ctx.fillStyle = `rgba(${tone}, ${alpha.toFixed(3)})`;
+      ctx.fillRect(left, top, right - left, bottom - top);
+
+      const cx = (left + right) / 2;
+      const cy = (top + bottom) / 2;
+      const bulgeAlpha = 0.025 + grainHash(seed + 2) * 0.035;
+      const radius = Math.max(right - left, bottom - top) * 0.55;
+      const bulge = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      bulge.addColorStop(0, `rgba(190, 178, 156, ${bulgeAlpha.toFixed(3)})`);
+      bulge.addColorStop(1, "rgba(190, 178, 156, 0)");
+      ctx.fillStyle = bulge;
+      ctx.fillRect(left, top, right - left, bottom - top);
+    }
+  }
+
+  // (2) 이음매 — 위에서 계산한 같은 격자(rowYs/rowCols)를 그대로 재사용한다.
+  const drawSeam = (x1: number, y1: number, x2: number, y2: number, seed: number): void => {
+    ctx.strokeStyle = "rgba(30, 25, 20, 0.24)";
+    ctx.lineWidth = 1;
+    strokeJitteredLine(ctx, x1, y1, x2, y2, seed);
+    ctx.save();
+    ctx.translate(0.7, 0.7);
+    ctx.strokeStyle = "rgba(175, 163, 142, 0.13)";
+    strokeJitteredLine(ctx, x1, y1, x2, y2, seed);
+    ctx.restore();
+  };
+
+  for (let r = 1; r < rowYs.length - 1; r++) {
+    drawSeam(0, rowYs[r], mapWidth, rowYs[r], r * 7.1 + 400);
+  }
+
+  for (let r = 0; r < rowCols.length; r++) {
+    const cols = rowCols[r];
+    for (let c = 1; c < cols.length - 1; c++) {
+      drawSeam(cols[c], rowYs[r], cols[c], rowYs[r + 1], r * 23.9 + c * 5.3 + 502);
+    }
+  }
+}
+
+function buildFloorGrain(mapWidth: number, mapHeight: number): HTMLCanvasElement {
+  const layer = document.createElement("canvas");
+  layer.width = mapWidth;
+  layer.height = mapHeight;
+  const ctx = layer.getContext("2d");
+  if (!ctx) return layer;
+
+  // 반점만 겹겹이 쌓는 건 결국 다 "노이즈"라 아무리 늘려도 균일하게 읽혀
+  // 여전히 밋밋하다는 피드백(사용자 지적) — 노이즈가 아니라 구조를 먼저 깔고
+  // (판석 이음매), 그 위에 노이즈 세 겹(풍화 얼룩·미세 반점·실금)을 얹는다.
+  // 색은 전부 배경 사진 실측 평균색(round1.png ≈ rgb(125,112,91))보다 살짝
+  // 어둡거나 밝은 무채색 계열로만 — 새 색을 들이면 사진과 어긋나 보인다.
+
+  // (0) 판석 이음매 — 구조. 자세한 이유는 buildPavingSeams 주석 참고.
+  buildPavingSeams(ctx, mapWidth, mapHeight);
+
+  // (1) 풍화 얼룩 — 반경 20~55px 부드러운 방사형 그라디언트를 성기게 흩뿌려
+  // 반점보다 훨씬 큰 스케일의 톤 변화를 준다.
+  const PATCH_COUNT = 34;
+  for (let i = 0; i < PATCH_COUNT; i++) {
+    const x = grainHash(i * 53.219 + 100) * mapWidth;
+    const y = grainHash(i * 91.113 + 101) * mapHeight;
+    const radius = 20 + grainHash(i * 17.881 + 102) * 35;
+    const isDark = grainHash(i * 63.917 + 103) < 0.5;
+    const alpha = 0.05 + grainHash(i * 29.483 + 104) * 0.08;
+    const tone = isDark ? "55, 47, 38" : "180, 168, 146";
+    const patch = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    patch.addColorStop(0, `rgba(${tone}, ${alpha.toFixed(3)})`);
+    patch.addColorStop(1, `rgba(${tone}, 0)`);
+    ctx.fillStyle = patch;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // (2) 미세 반점 — 얼룩 위에 촘촘히 얹어 입자감을 준다. 이전보다 대비를 살짝 키움.
+  const SPECK_COUNT = 1400;
+  for (let i = 0; i < SPECK_COUNT; i++) {
+    const x = grainHash(i * 12.9898) * mapWidth;
+    const y = grainHash(i * 78.233 + 1) * mapHeight;
+    const radius = 0.5 + grainHash(i * 37.719 + 2) * 1.3;
+    const isDark = grainHash(i * 91.345 + 3) < 0.55;
+    const alpha = 0.04 + grainHash(i * 15.732 + 4) * 0.09;
+    ctx.fillStyle = isDark ? `rgba(60, 52, 42, ${alpha.toFixed(3)})` : `rgba(175, 163, 142, ${alpha.toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // (3) 실금 — tile-art-prompt-guide.md가 바닥 재질로 명시한 "faint cracks"를
+  // 짧고 불규칙한 꺾인 선 여러 개로 성기게 흩뿌린다. 전에 벽에 시도했다가
+  // "안 어울린다"고 반려된 건 벽 경계 전체를 훑는 촘촘한 균열/네온 경계
+  // 모티프였다 — 이건 그것과 달리 낱개로 흩어진 짧은 포장재 균열이고, 색도
+  // 배경 사진 톤 안에서만 쓴다.
+  const CRACK_COUNT = 20;
+  ctx.strokeStyle = "rgba(35, 30, 24, 0.3)";
+  ctx.lineWidth = 0.8;
+  for (let i = 0; i < CRACK_COUNT; i++) {
+    let x = grainHash(i * 71.234 + 200) * mapWidth;
+    let y = grainHash(i * 44.556 + 201) * mapHeight;
+    let angle = grainHash(i * 19.77 + 203) * Math.PI * 2;
+    const segments = 3 + Math.floor(grainHash(i * 12.1 + 202) * 3);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let s = 0; s < segments; s++) {
+      angle += (grainHash(i * 33.1 + s * 7.7 + 204) - 0.5) * 1.4;
+      const len = 4 + grainHash(i * 5.5 + s * 3.3 + 205) * 8;
+      x += Math.cos(angle) * len;
+      y += Math.sin(angle) * len;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  return layer;
+}
+
+/**
  * 벽 채우기+AO+베벨 레이어를 오프스크린 캔버스 한 장에 미리 그려둔다. 이 그리드는
  * 라운드 전환 전까지 절대 바뀌지 않는데, 이 계산(300셀 순회 3회 + Path2D 생성)을
  * 매 프레임(rAF, ~60fps) 다시 하고 있었다 — `GameCanvas.tsx`의 `colliderCacheRef`가
@@ -85,34 +338,6 @@ function buildWallLayer(stage: Stage): HTMLCanvasElement {
     return grid.cells[row * grid.cols + col] === 1;
   };
 
-  // 신화적인 "그림자 세계 균열/네온 경계" 방향은 배경 사진(따뜻한 콘크리트/석재
-  // 바닥)과 계열이 전혀 안 맞는다는 피드백으로 폐기 — tile-art-prompt-guide.md가
-  // 애초에 정의해 둔 "바닥보다 확실히 어두운 석재 턱(raised stone curb/ledge),
-  // 베벨진 위쪽 모서리에 밝은 rim + 바닥과 맞닿는 부분의 은은한 AO 그림자"라는
-  // 실제 벽 재질 스펙을 그대로 코드로 옮긴다. 채우기 자체도 배경 사진 평균 색
-  // (stage.png ≈ rgb(125,112,91))과 같은 따뜻한 무채색 계열의 어두운 버전으로 —
-  // 검정이나 보라가 아니라 "같은 돌바닥의 그림자 진 부분"처럼 보이게 한다.
-  ctx.fillStyle = "rgba(40, 36, 31, 0.92)";
-  for (let row = 0; row < grid.rows; row++) {
-    for (let col = 0; col < grid.cols; col++) {
-      if (isWall(row, col)) {
-        ctx.fillRect(col * grid.tileSize, row * grid.tileSize, grid.tileSize, grid.tileSize);
-      }
-    }
-  }
-
-  // 통로와 맞닿는 바깥 경계 변에만(=미로의 진짜 윤곽선) 베벨+AO를 그린다. 선이
-  // 벽 칸 경계를 넘어 통로(바닥) 위로 새어나가지 않도록 벽 칸 전체를 클립 영역으로
-  // 잡고 그 안에서만 그린다.
-  const wallClip = new Path2D();
-  for (let row = 0; row < grid.rows; row++) {
-    for (let col = 0; col < grid.cols; col++) {
-      if (isWall(row, col)) {
-        wallClip.rect(col * grid.tileSize, row * grid.tileSize, grid.tileSize, grid.tileSize);
-      }
-    }
-  }
-
   const traceBoundary = (): void => {
     for (let row = 0; row < grid.rows; row++) {
       for (let col = 0; col < grid.cols; col++) {
@@ -142,10 +367,52 @@ function buildWallLayer(stage: Stage): HTMLCanvasElement {
     }
   };
 
-  ctx.save();
-  ctx.clip(wallClip);
+  // 접지 그림자(floor contact shadow) — 지금까지 AO는 벽 안쪽에만 클립돼 있어
+  // "벽이 바닥 위에 서 있다"는 깊이감이 벽 쪽에서 끊긴다. 노이즈를 더 얹는
+  // 대신 다른 걸 해보라는 지적(사용자) — 벽 경계선을 클립 없이 굵게+블러로
+  // 먼저 그려서, 절반은 곧 벽 채우기가 덮어 없어지고 나머지 절반(바깥쪽)만
+  // 통로 바닥 위에 부드럽게 스며드는 그림자로 남는다. 이 레이어(wallLayer)가
+  // floorGrain보다 나중에 합성되므로 바닥 질감 위에 자연스럽게 얹힌다.
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.32)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
+  ctx.shadowBlur = 9;
+  ctx.lineWidth = 22;
+  traceBoundary();
+  ctx.shadowBlur = 0;
+
+  // 신화적인 "그림자 세계 균열/네온 경계" 방향은 배경 사진(따뜻한 콘크리트/석재
+  // 바닥)과 계열이 전혀 안 맞는다는 피드백으로 폐기 — tile-art-prompt-guide.md가
+  // 애초에 정의해 둔 "바닥보다 확실히 어두운 석재 턱(raised stone curb/ledge),
+  // 베벨진 위쪽 모서리에 밝은 rim + 바닥과 맞닿는 부분의 은은한 AO 그림자"라는
+  // 실제 벽 재질 스펙을 그대로 코드로 옮긴다. 채우기 자체도 배경 사진 평균 색
+  // (stage.png ≈ rgb(125,112,91))과 같은 따뜻한 무채색 계열의 어두운 버전으로 —
+  // 검정이나 보라가 아니라 "같은 돌바닥의 그림자 진 부분"처럼 보이게 한다.
+  // 위 접지 그림자의 절반(벽 안쪽)이 이 채우기로 덮여 사라지는 게 의도된 동작이다.
+  ctx.fillStyle = "rgba(40, 36, 31, 0.92)";
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      if (isWall(row, col)) {
+        ctx.fillRect(col * grid.tileSize, row * grid.tileSize, grid.tileSize, grid.tileSize);
+      }
+    }
+  }
+
+  // 통로와 맞닿는 바깥 경계 변에만(=미로의 진짜 윤곽선) 베벨+AO를 그린다. 선이
+  // 벽 칸 경계를 넘어 통로(바닥) 위로 새어나가지 않도록 벽 칸 전체를 클립 영역으로
+  // 잡고 그 안에서만 그린다.
+  const wallClip = new Path2D();
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      if (isWall(row, col)) {
+        wallClip.rect(col * grid.tileSize, row * grid.tileSize, grid.tileSize, grid.tileSize);
+      }
+    }
+  }
+
+  ctx.save();
+  ctx.clip(wallClip);
 
   // AO — 턱이 바닥과 맞닿는 지점에 지는 부드러운 그림자. 경계에 걸쳐 굵게 그리고
   // 클립으로 벽 안쪽 절반만 남긴다.
@@ -224,6 +491,18 @@ export function drawStage(
   ctx.fillStyle = atmosphere.vignette;
   ctx.fillRect(0, 0, mapWidth, mapHeight);
 
+  // 바닥 grain — 벽 레이어보다 먼저 그려서 벽 칸 위는 자연히 덮이고, 통로
+  // (걸어다니는 바닥) 위에만 보이게 한다.
+  if (!floorGrainLayer || floorGrainLayer.width !== mapWidth || floorGrainLayer.height !== mapHeight) {
+    floorGrainLayer = buildFloorGrain(mapWidth, mapHeight);
+  }
+  ctx.drawImage(floorGrainLayer, 0, 0);
+
+  // 웅덩이(젖은 바닥 반사)는 여기서 그리지 않는다 — GameCanvas.tsx의 광원 루프가
+  // 이 함수 이후에 훨씬 강한 빛 웅덩이 그라디언트를 그 위에 덧그려서, 여기서
+  // 넣은 반사는 완전히 덮여 안 보였다(실측). 램프별 빛 웅덩이 바로 다음
+  // 단계에서 그리도록 그쪽으로 옮겼다 — drawPuddleReflection 참고.
+
   // 벽 채우기+AO+베벨은 stage가 바뀌기 전까지 절대 안 변하는 정적 레이어라
   // buildWallLayer()가 오프스크린 캔버스에 미리 그려둔 걸 매 프레임 한 번의
   // drawImage로만 합성한다(파일 상단 wallLayerCache 주석 참고).
@@ -253,15 +532,69 @@ export function drawStage(
     const glow = `rgba(${rgb}, 0.9)`;
     const lean = (wobble(x * 3.1 + y * 7.7) - 0.5) * 3;
 
+    // 바닥 문양 — 그냥 초 하나가 아니라 "제단" 자리라는 걸 바닥에서부터
+    // 드러내는 은은한 원형 눈금. 색은 이 촛불의 상태색(rgb)을 그대로 써서
+    // 초가 켜져 있다는 것과 시각적으로 묶는다 — 안전구역 경계선 색(보라)과는
+    // 겹치지 않으므로 혼동 없음.
+    ctx.strokeStyle = `rgba(${rgb}, 0.22)`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.ellipse(x, y + 3, 16, 5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(x, y + 3, 11, 3.4, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${rgb}, 0.15)`;
+    for (let i = 0; i < 8; i++) {
+      const angle = (Math.PI / 4) * i;
+      const innerX = x + Math.cos(angle) * 11;
+      const innerY = y + 3 + Math.sin(angle) * 3.4;
+      const outerX = x + Math.cos(angle) * 16;
+      const outerY = y + 3 + Math.sin(angle) * 5;
+      ctx.beginPath();
+      ctx.moveTo(innerX, innerY);
+      ctx.lineTo(outerX, outerY);
+      ctx.stroke();
+    }
+
     // 그림자 — 촛대가 바닥에 실제로 서 있다는 걸 보여주는 부드러운 접지 그림자.
     ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
     ctx.beginPath();
     ctx.ellipse(x, y + 5, 9, 2.5, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 굽 — 접시를 받치는 짧은 다리
-    ctx.fillStyle = "rgba(24, 19, 14, 0.85)";
-    ctx.fillRect(x - 1.4, y - 1, 2.8, 5);
+    // 받침대 — 맨바닥에 촛대만 놓인 게 아니라 작은 단(제단) 위에 놓인 것처럼
+    // 2단 돌받침을 깐다. 화려함을 더하면서도 "제단 촛불"이라는 기존 컨셉을
+    // 더 분명하게 보여준다. 세로 홈(flute)을 몇 줄 그어 매끈한 타원이 아니라
+    // 조각된 석재 단이라는 디테일을 준다.
+    ctx.fillStyle = "rgba(45, 40, 33, 0.88)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + 3.5, 8, 2.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(90, 80, 66, 0.5)";
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2.9, 8, 2.6, 0, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(20, 17, 13, 0.4)";
+    ctx.lineWidth = 0.5;
+    for (let i = -3; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x + i * 2, y + 2.2);
+      ctx.lineTo(x + i * 2.3, y + 5.2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(58, 51, 42, 0.9)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + 1.5, 5.5, 1.9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(20, 17, 13, 0.35)";
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x + i * 1.7, y + 0.2);
+      ctx.lineTo(x + i * 1.9, y + 3.1);
+      ctx.stroke();
+    }
 
     // 받침 접시 — 금속/도자기 재질감을 내기 위해 단색 대신 방사형 그라디언트로
     // 중심이 밝고 가장자리가 어두워지는 입체감을 준다(이전엔 균일한 선 하나뿐이라
@@ -283,12 +616,37 @@ export function drawStage(
     ctx.ellipse(x, y - 0.5, 11, 4, 0, Math.PI * 1.1, Math.PI * 1.9);
     ctx.stroke();
 
+    // 접시 테두리의 작은 장식 촉 4개 — 매끈한 금속 테가 아니라 세공된 장식
+    // 접시처럼 보이게 한다.
+    ctx.fillStyle = "rgba(220, 210, 190, 0.55)";
+    for (let i = 0; i < 4; i++) {
+      const angle = Math.PI * 0.25 + (Math.PI / 2) * i;
+      const sx2 = x + Math.cos(angle) * 10;
+      const sy2 = y + Math.sin(angle) * 3.6;
+      ctx.beginPath();
+      ctx.arc(sx2, sy2, 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 접시와 초 사이 짧은 목(baluster) — 굴곡을 줘 세공된 촛대 다리처럼 보이게
+    // 한다. 접시보다 나중에 그려야 가려지지 않는다. 초 밑면(y-2, 아래 wax 참고)에
+    // 정확히 맞닿도록 끝점을 고정한다 — 여기서 어긋나면 초가 목 위에 붕 뜬
+    // 것처럼 보인다.
+    ctx.fillStyle = "rgba(40, 34, 27, 0.9)";
+    ctx.beginPath();
+    ctx.moveTo(x - 1.5, y - 1);
+    ctx.quadraticCurveTo(x - 2.3, y + 0.2, x - 1.2, y + 1.2);
+    ctx.lineTo(x + 1.2, y + 1.2);
+    ctx.quadraticCurveTo(x + 2.3, y + 0.2, x + 1.5, y - 1);
+    ctx.closePath();
+    ctx.fill();
+
     // 접시 중앙의 작은 촉(spike) — 실제 촛대 접시처럼 초를 꽂아 고정하는 부분
     ctx.fillStyle = "rgba(60, 52, 42, 0.9)";
     ctx.beginPath();
-    ctx.moveTo(x - 1.5, y);
-    ctx.lineTo(x + 1.5, y);
-    ctx.lineTo(x, y - 3);
+    ctx.moveTo(x - 1.5, y - 1);
+    ctx.lineTo(x + 1.5, y - 1);
+    ctx.lineTo(x, y - 2);
     ctx.closePath();
     ctx.fill();
 
@@ -301,22 +659,60 @@ export function drawStage(
     wax.addColorStop(0.45, "#e9ddc2");
     wax.addColorStop(1, "#b8ac8c");
     ctx.fillStyle = wax;
-    ctx.fillRect(x - 3, y - 9, 6, 7);
+    // 원통이 아니라 위로 갈수록 살짝 좁아지는 사다리꼴 — 실제 초는 완벽한
+    // 직육면체가 아니라 타서 가늘어진 위쪽이 살짝 좁다.
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y - 2);
+    ctx.lineTo(x + 3, y - 2);
+    ctx.lineTo(x + 2.3, y - 9);
+    ctx.lineTo(x - 2.3, y - 9);
+    ctx.closePath();
+    ctx.fill();
     ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-    ctx.fillRect(x + 1.5, y - 8, 1, 6);
+    ctx.fillRect(x + 1.4, y - 8, 1, 6);
+    // 촛농 흘림 자국 — 기존 한 줄기 옆에 반대편에도 짧은 줄기를 더해 좌우
+    // 비대칭으로 더 자연스럽게 흘러내린 느낌을 준다.
+    ctx.fillStyle = "rgba(180, 168, 142, 0.55)";
+    ctx.beginPath();
+    ctx.moveTo(x - 2.1, y - 5);
+    ctx.quadraticCurveTo(x - 2.6, y - 2, x - 2.2, y - 0.5);
+    ctx.quadraticCurveTo(x - 1.9, y - 2, x - 1.6, y - 5);
+    ctx.closePath();
+    ctx.fill();
     ctx.fillStyle = "rgba(233, 221, 194, 0.8)";
     ctx.beginPath();
     ctx.ellipse(x - 2, y + 0.5, 1.3, 1, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + 2.2, y + 1, 0.9, 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-    // 불꽃 뒤 은은한 헤일로 — 실제로 빛을 뿜는 것처럼 부드럽게 번지는 광륜
-    const haloRadius = 20;
+    // 심지 — 불꽃 밑동에 짧고 살짝 구부러진 검은 심지를 넣어 불꽃이 허공이
+    // 아니라 실제 심지에서 타오르는 것처럼 보이게 한다.
+    ctx.strokeStyle = "rgba(35, 28, 20, 0.9)";
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(x, y - 9);
+    ctx.quadraticCurveTo(x + 0.8, y - 10.5, x + 0.3, y - 12);
+    ctx.stroke();
+
+    // 불꽃 뒤 은은한 헤일로 — 실제로 빛을 뿜는 것처럼 부드럽게 번지는 광륜.
+    // 넓게 퍼지는 겹 + 심지 바로 주변의 좁고 밝은 겹, 두 겹으로 화려함을 더한다.
+    const haloRadius = 24;
     const halo = ctx.createRadialGradient(x, y - 14, 0, x, y - 14, haloRadius);
-    halo.addColorStop(0, `rgba(${rgb}, 0.35)`);
+    halo.addColorStop(0, `rgba(${rgb}, 0.4)`);
     halo.addColorStop(1, `rgba(${rgb}, 0)`);
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(x, y - 14, haloRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    const innerHalo = ctx.createRadialGradient(x, y - 14, 0, x, y - 14, 8);
+    innerHalo.addColorStop(0, "rgba(255, 248, 230, 0.5)");
+    innerHalo.addColorStop(1, "rgba(255, 248, 230, 0)");
+    ctx.fillStyle = innerHalo;
+    ctx.beginPath();
+    ctx.arc(x, y - 14, 8, 0, Math.PI * 2);
     ctx.fill();
 
     // 불꽃 — 바깥의 넓고 옅은 겹 + 중간 포인트색 + 안쪽의 하얀 심지 불, 세 겹으로
@@ -342,14 +738,17 @@ export function drawStage(
     drawFlame(12.5, 5.5, 1.8, "#fff8e6");
     ctx.shadowBlur = 0;
 
-    // 잔불 — 불꽃 위로 옅게 흩어지는 불티 두 점으로 마무리감을 준다.
-    for (let i = 0; i < 2; i++) {
+    // 잔불 — 불꽃 위로 옅게 흩어지는 불티로 마무리감을 준다. 개수를 늘리고
+    // 흩어지는 범위도 넓혀 더 풍성하게 — 일부는 색불티, 일부는 흰 불티로 섞는다.
+    for (let i = 0; i < 4; i++) {
       const t = wobble(x * 11 + y * 13 + i * 29);
-      const ex = x + lean * 1.5 + (t - 0.5) * 10;
-      const ey = y - 20 - t * 8;
-      ctx.fillStyle = `rgba(${rgb}, ${(0.35 - t * 0.15).toFixed(2)})`;
+      const spread = wobble(x * 17 + y * 23 + i * 41);
+      const ex = x + lean * 1.5 + (t - 0.5) * 16;
+      const ey = y - 19 - t * 14 - i * 1.5;
+      const isWhite = spread < 0.3;
+      ctx.fillStyle = isWhite ? `rgba(255, 248, 230, ${(0.4 - t * 0.15).toFixed(2)})` : `rgba(${rgb}, ${(0.35 - t * 0.15).toFixed(2)})`;
       ctx.beginPath();
-      ctx.arc(ex, ey, 1 + t, 0, Math.PI * 2);
+      ctx.arc(ex, ey, 0.7 + t * 1.2, 0, Math.PI * 2);
       ctx.fill();
     }
   };

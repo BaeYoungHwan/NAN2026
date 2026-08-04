@@ -28,7 +28,7 @@ import {
   generateStage,
   seedForRound,
 } from "../procgen/stageGenerator";
-import { drawStage } from "./drawStage";
+import { drawPuddleReflection, drawStage } from "./drawStage";
 import { loadBackgroundArt } from "./backgroundArt";
 import {
   loadCharacterSprites,
@@ -793,7 +793,7 @@ function renderFrame(
   // 쓰이는(최근접) 광원만 밝게 강조해, 안전 구역이 왜 이동했는지 플레이어가
   // 알아볼 수 있게 한다 (ADR-004).
   const activeLight = nearestLight(stage.lightSources, characterPos);
-  for (const light of stage.lightSources) {
+  stage.lightSources.forEach((light, lightIndex) => {
     const isActive = light === activeLight;
     const poolRadius = isActive ? 46 : 26;
     const pool = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, poolRadius);
@@ -809,6 +809,11 @@ function renderFrame(
     ctx.beginPath();
     ctx.arc(light.x, light.y, poolRadius, 0, Math.PI * 2);
     ctx.fill();
+
+    // 웅덩이 반사 — 빛 웅덩이 바로 위에 그려야 안 덮인다(drawPuddleReflection
+    // 주석 참고). 활성/비활성 램프 색(위 pool 그라디언트와 동일한 rgb)을 그대로 써
+    // 이 램프 불빛을 반사하는 것처럼 보이게 한다.
+    drawPuddleReflection(ctx, light, lightIndex, isActive ? "245, 213, 71" : "138, 122, 58");
 
     // 가로등 실루엣 — 발판(기둥이 땅에 박힌 지점) + 위로 갈수록 가늘어지는 기둥 +
     // 브래킷 + 캡 + 육각 랜턴(속 코어+헤일로) 구조로, 캐릭터 스프라이트와 같은
@@ -890,7 +895,7 @@ function renderFrame(
     ctx.beginPath();
     ctx.arc(light.x, headY, r * 0.35, 0, Math.PI * 2);
     ctx.fill();
-  }
+  });
 
   // 그림자 — 죽음 시퀀스 중에는 그리지 않는다(몸만 죽음 모션으로 표시)
   if (!dying) {
