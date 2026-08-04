@@ -12,7 +12,7 @@ export function drawStage(
   ctx: CanvasRenderingContext2D,
   stage: Stage,
   background: HTMLImageElement | null,
-  checkpointsPassed: readonly boolean[],
+  checkpointsActivated: readonly boolean[],
 ): void {
   const { grid } = stage;
   const mapWidth = grid.cols * grid.tileSize;
@@ -39,14 +39,14 @@ export function drawStage(
     }
   }
 
-  // 통과한 세이브 포인트는 초록으로 바뀌어 계속 표시된다 — 지나가는 순간엔 판정
-  // 스킵 외에 아무 효과가 없어(GameCanvas의 justPassedSavePoint), 통과 여부를
-  // 눈으로 확인할 방법이 없다는 피드백이 있어 추가한 시각적 확인 수단.
+  // 직접 밟아 활성화한 세이브 포인트는 초록으로 바뀌어 계속 표시된다 — 밟는
+  // 순간엔 판정 스킵 외에 아무 효과가 없어(GameCanvas의 justReachedSavePoint),
+  // 활성화 여부를 눈으로 확인할 방법이 없다는 피드백이 있어 추가한 확인 수단.
   ctx.shadowBlur = 12;
   stage.checkpoints.forEach((checkpoint, i) => {
-    const passed = checkpointsPassed[i] ?? false;
-    ctx.shadowColor = passed ? "rgba(76, 175, 80, 0.9)" : "rgba(74, 144, 217, 0.9)";
-    ctx.fillStyle = passed ? "#4caf50" : "#4a90d9";
+    const activated = checkpointsActivated[i] ?? false;
+    ctx.shadowColor = activated ? "rgba(76, 175, 80, 0.9)" : "rgba(74, 144, 217, 0.9)";
+    ctx.fillStyle = activated ? "#4caf50" : "#4a90d9";
     ctx.beginPath();
     ctx.arc(checkpoint.x, checkpoint.y, 10, 0, Math.PI * 2);
     ctx.fill();

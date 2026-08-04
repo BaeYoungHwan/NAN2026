@@ -52,29 +52,35 @@ export function isStageCleared(farthestProgress: number, goalProgress: number): 
 }
 
 /**
- * 사망 리스폰 지점 — `farthestProgress`를 그대로 쓰지 않고, 그동안 넘은
- * 체크포인트 중 가장 마지막 것(없으면 스폰)으로 되돌린다.
- *
- * `farthestProgress`는 살아있는 동안 매 프레임 "현재 위치"로 갱신되므로, 죽는
- * 바로 그 프레임에도 이미 사망 지점 자신을 가리킨다 — 이걸 리스폰 지점으로
- * 그대로 쓰면 사망 페널티가 전혀 없어진다(죽은 자리에서 바로 재개 — 실제로
- * 발견된 버그). 체크포인트 단위로 스냅해 죽음에 의미 있는 손실을 되돌려주되,
- * "체크포인트를 정확히 밟아야만" 인정되던 문제(세이브 포인트를 못 찍으면 죽은
- * 자리 근처로도 못 돌아오던 문제)는 이 함수 자체가 `farthestProgress`(지나치기만
- * 해도 갱신됨) 기준으로 판정하므로 해결된 상태를 유지한다.
- *
- * `checkpoints`/`checkpointProgress`는 순서·길이가 같고 오름차순이다
- * (`procgen/stageGenerator.ts`의 `generateStage` 재시도 게이트가 보장).
+ * 세이브 포인트 활성화 반경(px) — 캐릭터 중심이 체크포인트 중심에서 이 거리
+ * 안에 들어오면 활성화된다. 통로 폭(2칸 = 80px)의 절반이라, 체크포인트가 놓인
+ * 통로를 지나가면 사실상 반드시 접촉한다(체크포인트는 항상 통로 셀 중앙에 있다).
  */
-export function respawnPointFor(
-  farthestProgress: number,
-  spawn: Point,
-  checkpoints: Point[],
-  checkpointProgress: number[],
-): Point {
+export const CHECKPOINT_TOUCH_RADIUS = 40;
+
+/** 캐릭터가 체크포인트를 실제로 밟았는지(활성화 반경 안에 들어왔는지). */
+export function hasTouchedCheckpoint(character: Point, checkpoint: Point): boolean {
+  return Math.hypot(character.x - checkpoint.x, character.y - checkpoint.y) <= CHECKPOINT_TOUCH_RADIUS;
+}
+
+/**
+ * 사망 리스폰 지점 — 그동안 **직접 밟아 활성화한** 체크포인트 중 가장 마지막
+ * 것(없으면 스폰)으로 되돌린다. 세이브 포인트를 하나도 안 밟고 진행하는 것은
+ * 정상 플레이이며(그 경우 항상 스폰으로 되돌아간다), 골까지 그대로 클리어할 수도 있다.
+ *
+ * 활성화 판정을 진행도(스폰 기준 BFS 거리) 비교로 하던 이전 방식은, 그 값이
+ * 방향 정보가 없는 스칼라라서 체크포인트와 정반대 갈래로 진행해도 "통과"로
+ * 처리됐다 — 밟은 적 없는 세이브 포인트가 활성 표시되고, 죽으면 가본 적도 없는
+ * 지점에서 리스폰되는 버그였다(실측: 전 라운드 전 체크포인트에서 재현). 판정
+ * 기준을 실제 접촉(`hasTouchedCheckpoint`)으로 바꿔 원리적으로 차단한다.
+ *
+ * `reached`는 `checkpoints`와 순서·길이가 같은 활성화 여부다 — 호출부
+ * (`ui/GameCanvas.tsx`)가 프레임마다 접촉을 검사해 한 번 true가 되면 유지(래치)한다.
+ */
+export function respawnPointFor(spawn: Point, checkpoints: Point[], reached: readonly boolean[]): Point {
   let respawn = spawn;
-  for (let i = 0; i < checkpointProgress.length; i++) {
-    if (farthestProgress >= checkpointProgress[i]) respawn = checkpoints[i];
+  for (let i = 0; i < checkpoints.length; i++) {
+    if (reached[i]) respawn = checkpoints[i];
   }
   return respawn;
 }
