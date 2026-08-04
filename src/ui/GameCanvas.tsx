@@ -28,7 +28,7 @@ import {
   generateStage,
   seedForRound,
 } from "../procgen/stageGenerator";
-import { drawPuddleReflection, drawStage } from "./drawStage";
+import { drawPuddleReflection, drawStage, hexToRgbString } from "./drawStage";
 import { loadBackgroundArt } from "./backgroundArt";
 import {
   loadCharacterSprites,
@@ -42,6 +42,12 @@ import {
 } from "./characterSprites";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
+// 광원(가로등) 불빛 색 — hex 하나로만 두고 rgb 문자열(그라디언트용)은
+// hexToRgbString으로 파생시킨다. 예전엔 이 색을 hex/rgb 리터럴로 여러 곳에
+// (빛 웅덩이, 광선, 랜턴 몸통, 그림자, 웅덩이 반사) 따로 박아넣어 하나만
+// 바꾸면 나머지가 조용히 어긋나는 구조였다(PR #17 리뷰).
+const LANTERN_COLOR_ACTIVE = "#f5d547";
+const LANTERN_COLOR_INACTIVE = "#8a7a3a";
 const DEATH_ANIM_MS = 1600; // 사망 시 4단계 애니메이션을 보여주는 동안 멈추는 시간
 const BODY_DISPLAY_HEIGHT = 42; // 충돌 판정(CHARACTER_RADIUS)과 무관한 순수 표시 크기
 const CAMERA_ZOOM = 2.2; // 캐릭터를 따라다니며 확대하는 배율 — 맵 전체 대신 주변만 크게 보여준다
@@ -795,15 +801,17 @@ function renderFrame(
   const activeLight = nearestLight(stage.lightSources, characterPos);
   stage.lightSources.forEach((light, lightIndex) => {
     const isActive = light === activeLight;
+    const lanternColor = isActive ? LANTERN_COLOR_ACTIVE : LANTERN_COLOR_INACTIVE;
+    const lanternRgb = hexToRgbString(lanternColor);
     const poolRadius = isActive ? 46 : 26;
     const pool = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, poolRadius);
     if (isActive) {
-      pool.addColorStop(0, "rgba(245, 213, 71, 0.85)");
-      pool.addColorStop(0.4, "rgba(245, 213, 71, 0.35)");
-      pool.addColorStop(1, "rgba(245, 213, 71, 0)");
+      pool.addColorStop(0, `rgba(${lanternRgb}, 0.85)`);
+      pool.addColorStop(0.4, `rgba(${lanternRgb}, 0.35)`);
+      pool.addColorStop(1, `rgba(${lanternRgb}, 0)`);
     } else {
-      pool.addColorStop(0, "rgba(138, 122, 58, 0.5)");
-      pool.addColorStop(1, "rgba(138, 122, 58, 0)");
+      pool.addColorStop(0, `rgba(${lanternRgb}, 0.5)`);
+      pool.addColorStop(1, `rgba(${lanternRgb}, 0)`);
     }
     ctx.fillStyle = pool;
     ctx.beginPath();
@@ -813,7 +821,7 @@ function renderFrame(
     // 웅덩이 반사 — 빛 웅덩이 바로 위에 그려야 안 덮인다(drawPuddleReflection
     // 주석 참고). 활성/비활성 램프 색(위 pool 그라디언트와 동일한 rgb)을 그대로 써
     // 이 램프 불빛을 반사하는 것처럼 보이게 한다.
-    drawPuddleReflection(ctx, light, lightIndex, isActive ? "245, 213, 71" : "138, 122, 58");
+    drawPuddleReflection(ctx, light, lightIndex, lanternRgb);
 
     // 가로등 실루엣 — 발판(기둥이 땅에 박힌 지점) + 위로 갈수록 가늘어지는 기둥 +
     // 브래킷 + 캡 + 육각 랜턴(속 코어+헤일로) 구조로, 캐릭터 스프라이트와 같은
@@ -823,12 +831,11 @@ function renderFrame(
     const poleColor = isActive ? "#2e2e2e" : "#1c1c1c";
     const headY = light.y - poleHeight;
     const r = isActive ? 7 : 5;
-    const lanternColor = isActive ? "#f5d547" : "#8a7a3a";
 
     if (isActive) {
       const beam = ctx.createLinearGradient(light.x, headY, light.x, light.y);
-      beam.addColorStop(0, "rgba(245, 213, 71, 0.28)");
-      beam.addColorStop(1, "rgba(245, 213, 71, 0)");
+      beam.addColorStop(0, `rgba(${lanternRgb}, 0.28)`);
+      beam.addColorStop(1, `rgba(${lanternRgb}, 0)`);
       ctx.fillStyle = beam;
       ctx.beginPath();
       ctx.moveTo(light.x - 5, headY);
@@ -869,7 +876,7 @@ function renderFrame(
 
     // 랜턴 몸통 — 육각형, 불빛이 채워진 안쪽 + 어두운 뼈대 테두리
     if (isActive) {
-      ctx.shadowColor = "#f5d547";
+      ctx.shadowColor = LANTERN_COLOR_ACTIVE;
       ctx.shadowBlur = 12;
     }
     ctx.fillStyle = lanternColor;

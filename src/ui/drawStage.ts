@@ -9,7 +9,7 @@ import { ROUND_BACKGROUND_BRIGHTNESS, type Round } from "../core/round";
  * 파일 안의 하드코딩 리터럴이라 실사용 위험은 없지만, `#fff` 같은 축약형이
  * 들어오면 조용히 틀린 값을 내므로 방어적으로 걸러낸다.
  */
-function hexToRgbString(hex: string): string {
+export function hexToRgbString(hex: string): string {
   if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
     console.warn(`hexToRgbString: "#rrggbb" 형식이 아님 — ${hex}`);
     return "255, 255, 255";
