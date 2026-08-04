@@ -1,4 +1,4 @@
-# Shadow-Step (가제)
+# 돌려돌려 그림자
 
 NHN 주최 **NAN2026 AI 게임 개발 해커톤** 사전과제 제출용 웹 게임입니다.
 
@@ -18,7 +18,7 @@ NHN 주최 **NAN2026 AI 게임 개발 해커톤** 사전과제 제출용 웹 게
 | 4 | AI 활용 기술 문서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/ai-usage-report.md`](docs/product-specs/ai-usage-report.md) |
 | 5 | 팀원 롤 기술서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/team-roles.md`](docs/product-specs/team-roles.md) |
 
-플레이 가능 빌드는 배포돼 있지만, PRD 미결 사항(그림자 길이·통로 폭·게임 제목 등, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)이 확정되고 맵 디자인이 반영된 뒤 최종 밸런스로 갱신될 예정입니다.
+플레이 가능 빌드는 배포돼 있지만, PRD 미결 사항(그림자 길이·통로 폭 등, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)이 확정되고 맵 디자인이 반영된 뒤 최종 밸런스로 갱신될 예정입니다.
 
 ---
 
