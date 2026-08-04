@@ -4,6 +4,7 @@ import type { AudioEngine } from "../audio/audioEngine";
 import { dangerBeepSpec, justReturnedToSafety } from "../audio/dangerTone";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
+import { debugRoundFromQuery } from "../core/debugRound";
 import {
   controlsReversed,
   effectiveAngleTolerance,
@@ -30,7 +31,7 @@ import {
   generateStage,
   seedForRound,
 } from "../procgen/stageGenerator";
-import { drawStage } from "./drawStage";
+import { drawPuddleReflection, drawStage, hexToRgbString } from "./drawStage";
 import { loadBackgroundArt } from "./backgroundArt";
 import {
   loadCharacterSprites,
@@ -44,6 +45,12 @@ import {
 } from "./characterSprites";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
+// 광원(가로등) 불빛 색 — hex 하나로만 두고 rgb 문자열(그라디언트용)은
+// hexToRgbString으로 파생시킨다. 예전엔 이 색을 hex/rgb 리터럴로 여러 곳에
+// (빛 웅덩이, 광선, 랜턴 몸통, 그림자, 웅덩이 반사) 따로 박아넣어 하나만
+// 바꾸면 나머지가 조용히 어긋나는 구조였다(PR #17 리뷰).
+const LANTERN_COLOR_ACTIVE = "#f5d547";
+const LANTERN_COLOR_INACTIVE = "#8a7a3a";
 const DEATH_ANIM_MS = 1600; // 사망 시 4단계 애니메이션을 보여주는 동안 멈추는 시간
 const BODY_DISPLAY_HEIGHT = 42; // 충돌 판정(CHARACTER_RADIUS)과 무관한 순수 표시 크기
 const CAMERA_ZOOM = 2.2; // 캐릭터를 따라다니며 확대하는 배율 — 맵 전체 대신 주변만 크게 보여준다
@@ -208,12 +215,13 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const inputRef = useKeyboardInput();
   // useState는 세터를 쓰지 않고 "한 번만 계산되는 초기값" 용도로만 쓴다 —
   // 실제 최신값은 항상 stageRef로 읽는다(위 주석 참고).
-  const [initialStage] = useState<Stage>(() => generateStage(DEFAULT_SEED));
+  const [initialRound] = useState<Round>(debugRoundFromQuery);
+  const [initialStage] = useState<Stage>(() => generateStage(seedForRound(DEFAULT_SEED, initialRound)));
   const stageRef = useRef<Stage>(initialStage);
   const characterRef = useRef<Point>({ ...stageRef.current.spawn });
   const shadowAngleRef = useRef(naturalAngle(stageRef.current.lightSources, stageRef.current.spawn));
   const deathCountRef = useRef(0);
-  const roundRef = useRef<Round>(1);
+  const roundRef = useRef<Round>(initialRound);
   const clearedRef = useRef(false);
   // 이 라운드 스테이지 안에서 가장 멀리 도달한 진척도(스폰 기준 BFS 통로 거리,
   // `progressAt`) — 단조증가, 사망해도 줄지 않는다. **골 도달(스테이지 클리어)
@@ -246,7 +254,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   // 같은 주기로 묶어 발이 땅에 닿는 타이밍에 소리가 나게 한다. 멈추면 -1로 리셋한다.
   const lastFootstepFrameRef = useRef(-1);
   const [sprites, setSprites] = useState<CharacterSprites | null>(null);
-  const [backgrounds, setBackgrounds] = useState<Record<Round, HTMLImageElement | null> | null>(null);
+  const [background, setBackground] = useState<HTMLImageElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -264,7 +272,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     let cancelled = false;
     loadBackgroundArt()
       .then((loaded) => {
-        if (!cancelled) setBackgrounds(loaded);
+        if (!cancelled) setBackground(loaded);
       })
       .catch((error) => console.error(error));
     return () => {
@@ -292,8 +300,15 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   useImperativeHandle(
     ref,
     () => ({
+      // ?round= 디버그 진입점과 무관하게 항상 1R부터 다시 시작한다 — "재시작"은
+      // 게임을 처음부터 다시 플레이한다는 의미이지, 프리뷰 중이던 라운드로
+      // 돌아오는 버튼이 아니다. ?round=2/3으로 들어와 프리뷰하다 재시작을 누르면
+      // 1R로 넘어가는 게 의도된 동작이다. `seedForRound(DEFAULT_SEED, 1) ===
+      // DEFAULT_SEED`가 항상 성립해 `generateStage(DEFAULT_SEED)`와 결과가
+      // 같지만(초기화 로직 참고), 그 항등식이 나중에 바뀌면 여기가 조용히
+      // 어긋날 수 있으므로 `seedForRound`를 명시적으로 거쳐 대칭을 유지한다.
       restart: () => {
-        loadStage(generateStage(DEFAULT_SEED));
+        loadStage(generateStage(seedForRound(DEFAULT_SEED, 1)));
         roundRef.current = 1;
         onRoundChange?.(1, false);
         clearedRef.current = false;
@@ -502,7 +517,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // 활성화 상태는 래치라, 한 번 밟은 세이브 포인트는 그 스테이지가 끝날 때까지 유지된다.
       const checkpointsActivated = checkpointsReachedRef.current;
 
-      renderFrame(ctx, stage, sprites, backgrounds?.[roundRef.current] ?? null, {
+      renderFrame(ctx, stage, sprites, background, {
         characterPos: characterRef.current,
         shadowAngle: shadowAngleRef.current,
         bodyPose,
@@ -525,7 +540,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, backgrounds, audioEngineRef]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, background, audioEngineRef]);
 
   return (
     <>
@@ -834,41 +849,140 @@ function renderFrame(
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
   ctx.translate(-camX, -camY);
 
-  drawStage(ctx, stage, background, checkpointsActivated);
+  drawStage(ctx, stage, background, checkpointsActivated, round);
 
-  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
+  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 이 연분홍
+  // (#dcafbe)은 background-art-prompt-guide.md 컬러 팔레트가 "안전구역 경계선
+  // UI 전용"으로 예약해 둔 포인트색이다. 벽 오버레이는 이 PR에서 석재 턱
+  // 재질(따뜻한 무채색, drawStage.ts의 buildWallLayer 참고)로 바뀌었으므로 더
+  // 이상 같은 색 계열이 아니다 — "위험 경계"라는 의미는 형태(부채꼴 vs 턱)로만
+  // 구분한다.
   if (isGuideVisible(round)) {
     ctx.beginPath();
     ctx.moveTo(characterPos.x, characterPos.y);
     ctx.arc(characterPos.x, characterPos.y, SAFE_ZONE_RADIUS, natural - tolerance, natural + tolerance);
     ctx.closePath();
-    ctx.fillStyle = "rgba(74, 144, 217, 0.25)";
+    ctx.fillStyle = "rgba(220, 175, 190, 0.25)";
     ctx.fill();
-    ctx.strokeStyle = "#4a90d9";
+    ctx.strokeStyle = "#dcafbe";
     ctx.lineWidth = 1;
     ctx.stroke();
   }
 
-  // 광원(가로등) — 여러 개 중 지금 판정에 쓰이는(최근접) 광원만 밝게 강조해,
-  // 안전 구역이 왜 이동했는지 플레이어가 알아볼 수 있게 한다 (ADR-004). 활성
-  // 광원은 캐릭터 반경(10px)보다 큰 바깥 링도 함께 그려, 캐릭터가 광원 바로
-  // 위에 서 있어도(예: 스폰 지점) 강조 표시가 가려지지 않게 한다.
+  // 광원(가로등) — 배경 이미지가 더 이상 가로등 기둥/구조를 그리지 않으므로
+  // (background-art-prompt-guide.md 2026-08-03 수정: "The lamps themselves should
+  // NOT be drawn as visible fixtures/posts... since the game engine renders actual
+  // lamp sprites separately"), 실제 가로등 형태를 그리는 책임이 전적으로 이 코드로
+  // 넘어왔다. 바닥 빛 웅덩이(방사형 그라디언트)만으로는 "여기 물리적으로 가로등이
+  // 서 있다"가 전달되지 않아, 캐릭터 스프라이트와 같은 정면 실루엣 관습으로 얇은
+  // 기둥 + 램프 머리를 웅덩이 중심 위에 세워 그린다. 여러 광원 중 지금 판정에
+  // 쓰이는(최근접) 광원만 밝게 강조해, 안전 구역이 왜 이동했는지 플레이어가
+  // 알아볼 수 있게 한다 (ADR-004).
   const activeLight = nearestLight(stage.lightSources, characterPos);
-  for (const light of stage.lightSources) {
+  stage.lightSources.forEach((light, lightIndex) => {
     const isActive = light === activeLight;
-    ctx.fillStyle = isActive ? "#f5d547" : "#8a7a3a";
+    const lanternColor = isActive ? LANTERN_COLOR_ACTIVE : LANTERN_COLOR_INACTIVE;
+    const lanternRgb = hexToRgbString(lanternColor);
+    const poolRadius = isActive ? 46 : 26;
+    const pool = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, poolRadius);
+    if (isActive) {
+      pool.addColorStop(0, `rgba(${lanternRgb}, 0.85)`);
+      pool.addColorStop(0.4, `rgba(${lanternRgb}, 0.35)`);
+      pool.addColorStop(1, `rgba(${lanternRgb}, 0)`);
+    } else {
+      pool.addColorStop(0, `rgba(${lanternRgb}, 0.5)`);
+      pool.addColorStop(1, `rgba(${lanternRgb}, 0)`);
+    }
+    ctx.fillStyle = pool;
     ctx.beginPath();
-    ctx.arc(light.x, light.y, isActive ? 8 : 5, 0, Math.PI * 2);
+    ctx.arc(light.x, light.y, poolRadius, 0, Math.PI * 2);
     ctx.fill();
 
+    // 웅덩이 반사 — 빛 웅덩이 바로 위에 그려야 안 덮인다(drawPuddleReflection
+    // 주석 참고). 활성/비활성 램프 색(위 pool 그라디언트와 동일한 rgb)을 그대로 써
+    // 이 램프 불빛을 반사하는 것처럼 보이게 한다.
+    drawPuddleReflection(ctx, light, lightIndex, lanternRgb);
+
+    // 가로등 실루엣 — 발판(기둥이 땅에 박힌 지점) + 위로 갈수록 가늘어지는 기둥 +
+    // 브래킷 + 캡 + 육각 랜턴(속 코어+헤일로) 구조로, 캐릭터 스프라이트와 같은
+    // 정면 실루엣 관습을 따른다. 기둥과 랜턴을 잇는 은은한 세로 광선으로 "이 빛
+    // 웅덩이가 바로 이 기둥에서 뿜어져 나온다"는 인과관계를 시각적으로 이어준다.
+    const poleHeight = isActive ? 22 : 15;
+    const poleColor = isActive ? "#2e2e2e" : "#1c1c1c";
+    const headY = light.y - poleHeight;
+    const r = isActive ? 7 : 5;
+
     if (isActive) {
-      ctx.strokeStyle = "#f5d547";
-      ctx.lineWidth = 2;
+      const beam = ctx.createLinearGradient(light.x, headY, light.x, light.y);
+      beam.addColorStop(0, `rgba(${lanternRgb}, 0.28)`);
+      beam.addColorStop(1, `rgba(${lanternRgb}, 0)`);
+      ctx.fillStyle = beam;
       ctx.beginPath();
-      ctx.arc(light.x, light.y, 16, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.moveTo(light.x - 5, headY);
+      ctx.lineTo(light.x + 5, headY);
+      ctx.lineTo(light.x + 1.5, light.y);
+      ctx.lineTo(light.x - 1.5, light.y);
+      ctx.closePath();
+      ctx.fill();
     }
-  }
+
+    // 발판 — 기둥이 땅에 서 있는 지점을 눌러주는 얕은 타원 그림자
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(light.x, light.y, 5, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 기둥 — 아래가 넓고 위가 좁은 사다리꼴로 그려 원기둥의 부피감을 흉내낸다.
+    ctx.fillStyle = poleColor;
+    ctx.beginPath();
+    ctx.moveTo(light.x - 2, light.y);
+    ctx.lineTo(light.x + 2, light.y);
+    ctx.lineTo(light.x + 1, headY + 3);
+    ctx.lineTo(light.x - 1, headY + 3);
+    ctx.closePath();
+    ctx.fill();
+
+    // 브래킷 — 랜턴이 기둥에 걸리는 지점의 작은 가로대
+    ctx.fillRect(light.x - r * 0.6, headY + 1, r * 1.2, 2);
+
+    // 캡 — 랜턴 위를 덮는 작은 삼각 지붕
+    ctx.fillStyle = poleColor;
+    ctx.beginPath();
+    ctx.moveTo(light.x, headY - r - 4);
+    ctx.lineTo(light.x - r, headY - r * 0.3);
+    ctx.lineTo(light.x + r, headY - r * 0.3);
+    ctx.closePath();
+    ctx.fill();
+
+    // 랜턴 몸통 — 육각형, 불빛이 채워진 안쪽 + 어두운 뼈대 테두리
+    if (isActive) {
+      ctx.shadowColor = LANTERN_COLOR_ACTIVE;
+      ctx.shadowBlur = 12;
+    }
+    ctx.fillStyle = lanternColor;
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 2;
+      const px = light.x + Math.cos(angle) * r;
+      const py = headY + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = poleColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 필라멘트 코어 — 랜턴 한가운데 더 밝은 점을 얹어 실제로 빛을 뿜는
+    // 광원처럼 보이게 한다(육각형 채우기만으로는 평면 스티커처럼 보임).
+    ctx.fillStyle = isActive ? "#fff3c4" : "#c9b96a";
+    ctx.beginPath();
+    ctx.arc(light.x, headY, r * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+  });
 
   // 그림자 — 죽음 시퀀스 중에는 그리지 않는다(몸만 죽음 모션으로 표시)
   if (!dying) {

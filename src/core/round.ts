@@ -108,3 +108,15 @@ export function effectiveAngleTolerance(round: Round, baseTolerance: number): nu
 export function controlsReversed(round: Round): boolean {
   return isDemeritRound(round);
 }
+
+/**
+ * 라운드별 배경 밝기 배율 — `backgroundArt.ts`가 로드하는 배경 이미지 한 장을
+ * 라운드마다 다른 밝기로 보여주기 위한 값(PR #17 리뷰: round2/3용 PNG를 밝기만
+ * 다르게 별도로 구워 4.6MB를 중복 보관하고 있었다). 값이 작을수록 어둡다 —
+ * 라운드가 올라갈수록 시야가 좁아지는 긴장감을 준다.
+ */
+export const ROUND_BACKGROUND_BRIGHTNESS: Record<Round, number> = {
+  1: 1,
+  2: 0.65,
+  3: 0.3,
+};

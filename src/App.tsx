@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import type { Round } from "./core/round";
 import { BGM_FOR_ROUND } from "./audio/soundCues";
 import { useAudio } from "./audio/useAudio";
+import { debugRoundFromQuery } from "./core/debugRound";
 import { ENDING_SLIDES, OPENING_SLIDES } from "./content/cutsceneSlides";
 import { DEATH_LINES, pickRandomLine, ROUND_ADVANCE_LINES, TUTORIAL_LINES } from "./content/reaperLines";
 import CutsceneSlide from "./ui/CutsceneSlide";
@@ -15,10 +16,13 @@ const DEATH_LINE_AUTO_DISMISS_MS = 1500;
 
 function App() {
   const [deathCount, setDeathCount] = useState(0);
-  const [round, setRound] = useState<Round>(1);
+  const [round, setRound] = useState<Round>(debugRoundFromQuery);
   const [dialogueQueue, setDialogueQueue] = useState<string[]>([]);
   const [dialogueAutoDismissMs, setDialogueAutoDismissMs] = useState<number | undefined>(undefined);
-  const [showOpening, setShowOpening] = useState(true);
+  // ?round=2/3 디버그 프리뷰로 들어온 경우(개발 빌드 한정 — debugRoundFromQuery
+  // 참고) 오프닝 컷신을 건너뛴다. 절차적 생성 맵을 빠르게 확인하려는 목적과
+  // 오프닝이 항상 뜨는 게 어긋난다는 지적(PR #17 리뷰) 반영.
+  const [showOpening, setShowOpening] = useState(() => round === 1);
   const [showEnding, setShowEnding] = useState(false);
   const gameCanvasRef = useRef<GameCanvasHandle>(null);
   const audio = useAudio();
