@@ -55,13 +55,16 @@ function buildAtmosphere(
 /**
  * 바닥 실사 타일(`tile-art-prompt-guide.md` 프롬프트로 생성한 seamless 정사각
  * 텍스처)을 맵 전체에 반복(pattern) 렌더링한다. 원본 이미지를 그대로
- * `createPattern`하면 이미지 자체 해상도(1254px 등)로 반복돼 40px 그리드
- * 셀 하나보다 텍스처 조각 하나가 훨씬 커져버린다 — `ctx.scale`로 좌표계 자체를
- * 줄인 다음 그 안에서 패턴을 채워, 실제 셀 크기에 맞는 밀도로 반복되게 한다.
- * FLOOR_TILE_SCALE=0.16은 원본의 낱장 판석 무늬가 그리드 1칸(40px)에 대략
- * 하나씩 오도록 실측해 고른 값(스케일 비교 렌더링으로 확인).
+ * `createPattern`하면 이미지 자체 해상도(512px, 배포 용량 때문에 원본 1254px에서
+ * 리사이즈함 — PR #20 리뷰 반영)로 반복돼 40px 그리드 셀 하나보다 텍스처 조각
+ * 하나가 훨씬 커져버린다 — `ctx.scale`로 좌표계 자체를 줄인 다음 그 안에서
+ * 패턴을 채워, 실제 셀 크기에 맞는 밀도로 반복되게 한다.
+ * FLOOR_TILE_SCALE=0.392는 원본의 낱장 판석 무늬가 그리드 1칸(40px)에 대략
+ * 하나씩 오도록 1254px 기준 실측한 값(0.16)을, 리사이즈 비율(512/1254)만큼
+ * 반비례로 보정한 것 — 이미지를 줄인 만큼 스케일을 키워야 화면상 반복 주기가
+ * 그대로 유지된다.
  */
-const FLOOR_TILE_SCALE = 0.16;
+const FLOOR_TILE_SCALE = 0.392;
 
 let floorTileLayer: { canvas: HTMLCanvasElement; tile: HTMLImageElement; width: number; height: number } | null = null;
 
@@ -349,12 +352,15 @@ function buildFloorGrain(mapWidth: number, mapHeight: number): HTMLCanvasElement
  * 새로 그려지고, 이전 캔버스는 참조가 끊겨 GC된다.
  */
 /**
- * 벽 실사 타일 스케일 — 원본에서 실측한 세로 반복 주기(≈730px, bevel+블록+
- * 이음매+어두운 홈)를 그대로 40px 셀에 욱여넣으면 얇은 줄무늬가 촘촘히 반복돼
- * 오히려 안 읽힌다(스케일 비교 렌더링에서 확인) — 이 게임 벽은 대부분 1~2칸
- * 폭이라 "판 하나가 넉넉하게 보이는" 큰 스케일이 나아, 바닥보다 훨씬 덜 줄인다.
+ * 벽 실사 타일 스케일 — 원본(1254px)에서 실측한 세로 반복 주기(≈730px, bevel+
+ * 블록+이음매+어두운 홈)를 그대로 40px 셀에 욱여넣으면 얇은 줄무늬가 촘촘히
+ * 반복돼 오히려 안 읽힌다(스케일 비교 렌더링에서 확인) — 이 게임 벽은 대부분
+ * 1~2칸 폭이라 "판 하나가 넉넉하게 보이는" 큰 스케일이 나아, 바닥보다 훨씬
+ * 덜 줄인다. 0.3은 1254px 기준 실측값 — 이미지가 배포 용량 때문에 512px로
+ * 리사이즈되면서(PR #20 리뷰 반영) 리사이즈 비율(512/1254)만큼 반비례 보정해
+ * 0.735로 조정했다(화면상 반복 주기는 그대로 유지).
  */
-const WALL_TILE_SCALE = 0.3;
+const WALL_TILE_SCALE = 0.735;
 
 const wallLayerCache = new WeakMap<Stage, { layer: HTMLCanvasElement; wallTile: HTMLImageElement | null }>();
 
@@ -495,7 +501,7 @@ export function drawStage(
   ctx: CanvasRenderingContext2D,
   stage: Stage,
   background: HTMLImageElement | null,
-  checkpointsPassed: readonly boolean[],
+  checkpointsActivated: readonly boolean[],
   round: Round,
   tiles?: { floor: HTMLImageElement | null; wall: HTMLImageElement | null },
 ): void {
@@ -589,9 +595,9 @@ export function drawStage(
   // 세이브 포인트·골을 "제단 촛불"로 그린다 — 광원(육각 랜턴, 기하학적·서 있는
   // 기둥형)과 실루엣이 겹치면 둘을 헷갈리게 되므로, 촛불은 각진 형태 없이 둥근
   // 받침 위에 유기적인 불꽃 하나만 두어 "잠시 쉬어가는 지점"이라는 성격을
-  // 형태로도 구분한다. 통과한 세이브 포인트는 초록으로 바뀌어 계속 표시된다
-  // (GameCanvas의 justPassedSavePoint로는 통과 여부를 눈으로 확인할 방법이 없다는
-  // 피드백 반영). 미통과 색은 고정 팔레트의 크림톤 — 보라는 안전 구역 경계선/벽
+  // 형태로도 구분한다. 직접 밟아 활성화한 세이브 포인트는 초록으로 바뀌어 계속
+  // 표시된다(GameCanvas의 justReachedSavePoint로는 활성화 여부를 눈으로 확인할
+  // 방법이 없다는 피드백 반영). 미활성 색은 고정 팔레트의 크림톤 — 보라는 안전 구역 경계선/벽
   // 테두리 전용이라 재사용하면 "이것도 위험 경계인가?" 하는 혼동을 준다.
   // 좌표를 시드로 미세한 개체차를 준다 — 촛불마다 완전히 똑같이 찍어낸 스탬프처럼
   // 보이지 않도록, 불꽃이 살짝 한쪽으로 기울고 잔불 크기가 조금씩 달라지게 한다.
@@ -827,8 +833,8 @@ export function drawStage(
   };
 
   stage.checkpoints.forEach((checkpoint, i) => {
-    const passed = checkpointsPassed[i] ?? false;
-    drawCandleMark(checkpoint.x, checkpoint.y, passed ? "#4caf50" : "#f0e6d2");
+    const activated = checkpointsActivated[i] ?? false;
+    drawCandleMark(checkpoint.x, checkpoint.y, activated ? "#4caf50" : "#f0e6d2");
   });
 
   drawCandleMark(stage.goal.x, stage.goal.y, "#f5a623");
