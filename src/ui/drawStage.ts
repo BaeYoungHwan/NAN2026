@@ -53,13 +53,51 @@ function buildAtmosphere(
 }
 
 /**
+ * 바닥 실사 타일(`tile-art-prompt-guide.md` 프롬프트로 생성한 seamless 정사각
+ * 텍스처)을 맵 전체에 반복(pattern) 렌더링한다. 원본 이미지를 그대로
+ * `createPattern`하면 이미지 자체 해상도(512px, 배포 용량 때문에 원본 1254px에서
+ * 리사이즈함 — PR #20 리뷰 반영)로 반복돼 40px 그리드 셀 하나보다 텍스처 조각
+ * 하나가 훨씬 커져버린다 — `ctx.scale`로 좌표계 자체를 줄인 다음 그 안에서
+ * 패턴을 채워, 실제 셀 크기에 맞는 밀도로 반복되게 한다.
+ * FLOOR_TILE_SCALE=0.392는 원본의 낱장 판석 무늬가 그리드 1칸(40px)에 대략
+ * 하나씩 오도록 1254px 기준 실측한 값(0.16)을, 리사이즈 비율(512/1254)만큼
+ * 반비례로 보정한 것 — 이미지를 줄인 만큼 스케일을 키워야 화면상 반복 주기가
+ * 그대로 유지된다.
+ */
+const FLOOR_TILE_SCALE = 0.392;
+
+let floorTileLayer: { canvas: HTMLCanvasElement; tile: HTMLImageElement; width: number; height: number } | null = null;
+
+function buildFloorTileLayer(mapWidth: number, mapHeight: number, floorTile: HTMLImageElement): HTMLCanvasElement {
+  const layer = document.createElement("canvas");
+  layer.width = mapWidth;
+  layer.height = mapHeight;
+  const ctx = layer.getContext("2d");
+  if (!ctx) return layer;
+
+  const pattern = ctx.createPattern(floorTile, "repeat");
+  if (!pattern) return layer;
+
+  ctx.save();
+  ctx.scale(FLOOR_TILE_SCALE, FLOOR_TILE_SCALE);
+  ctx.fillStyle = pattern;
+  ctx.fillRect(0, 0, mapWidth / FLOOR_TILE_SCALE, mapHeight / FLOOR_TILE_SCALE);
+  ctx.restore();
+
+  return layer;
+}
+
+/**
  * 바닥 배경(`stage.png`)이 맵 전체에 사진 한 장으로 통째로 늘어나 있어(타일링
  * 없음), 통로가 어디로 꺾이든 항상 같은 느낌이라 밋밋하다는 피드백 — 실사 타일
- * 이미지를 새로 뽑기 전까지(tile-art-prompt-guide.md 참고), 코드만으로 "닳은
- * 콘크리트" 특유의 미세한 알갱이(grain)를 얹어 질감을 보강한다. 결정론적 해시로
- * 고정된 반점 배치를 그리므로 프레임마다 위치가 흔들리지 않는다. 맵 크기(800×600)가
- * `GRID_COLS`/`GRID_ROWS`/`TILE_SIZE`로 항상 고정이라 stage와 무관하게 한 번만
- * 그려 재사용한다(크기가 바뀌는 경우를 대비해 방어적으로 재생성 체크는 한다).
+ * 이미지가 준비되기 전까지(tile-art-prompt-guide.md 참고), 코드만으로 "닳은
+ * 콘크리트" 특유의 미세한 알갱이(grain)를 얹어 질감을 보강했었다. 실사 타일이
+ * 로드되면 이 절차적 레이어는 건너뛴다(drawStage 참고) — 타일 자체에 이미
+ * 풍화·균열 질감이 있어서 같이 쓰면 서로 다른 스케일의 무늬가 겹쳐 오히려
+ * 지저분해진다. 결정론적 해시로 고정된 반점 배치를 그리므로 프레임마다
+ * 위치가 흔들리지 않는다. 맵 크기(800×600)가 `GRID_COLS`/`GRID_ROWS`/`TILE_SIZE`로
+ * 항상 고정이라 stage와 무관하게 한 번만 그려 재사용한다(크기가 바뀌는 경우를
+ * 대비해 방어적으로 재생성 체크는 한다).
  */
 let floorGrainLayer: HTMLCanvasElement | null = null;
 
@@ -313,9 +351,20 @@ function buildFloorGrain(mapWidth: number, mapHeight: number): HTMLCanvasElement
  * 객체별로 캐싱하므로(WeakMap) 라운드가 바뀌어 새 Stage가 만들어지면 자동으로
  * 새로 그려지고, 이전 캔버스는 참조가 끊겨 GC된다.
  */
-const wallLayerCache = new WeakMap<Stage, HTMLCanvasElement>();
+/**
+ * 벽 실사 타일 스케일 — 원본(1254px)에서 실측한 세로 반복 주기(≈730px, bevel+
+ * 블록+이음매+어두운 홈)를 그대로 40px 셀에 욱여넣으면 얇은 줄무늬가 촘촘히
+ * 반복돼 오히려 안 읽힌다(스케일 비교 렌더링에서 확인) — 이 게임 벽은 대부분
+ * 1~2칸 폭이라 "판 하나가 넉넉하게 보이는" 큰 스케일이 나아, 바닥보다 훨씬
+ * 덜 줄인다. 0.3은 1254px 기준 실측값 — 이미지가 배포 용량 때문에 512px로
+ * 리사이즈되면서(PR #20 리뷰 반영) 리사이즈 비율(512/1254)만큼 반비례 보정해
+ * 0.735로 조정했다(화면상 반복 주기는 그대로 유지).
+ */
+const WALL_TILE_SCALE = 0.735;
 
-function buildWallLayer(stage: Stage): HTMLCanvasElement {
+const wallLayerCache = new WeakMap<Stage, { layer: HTMLCanvasElement; wallTile: HTMLImageElement | null }>();
+
+function buildWallLayer(stage: Stage, wallTile: HTMLImageElement | null): HTMLCanvasElement {
   const { grid } = stage;
   const mapWidth = grid.cols * grid.tileSize;
   const mapHeight = grid.rows * grid.tileSize;
@@ -382,26 +431,10 @@ function buildWallLayer(stage: Stage): HTMLCanvasElement {
   traceBoundary();
   ctx.shadowBlur = 0;
 
-  // 신화적인 "그림자 세계 균열/네온 경계" 방향은 배경 사진(따뜻한 콘크리트/석재
-  // 바닥)과 계열이 전혀 안 맞는다는 피드백으로 폐기 — tile-art-prompt-guide.md가
-  // 애초에 정의해 둔 "바닥보다 확실히 어두운 석재 턱(raised stone curb/ledge),
-  // 베벨진 위쪽 모서리에 밝은 rim + 바닥과 맞닿는 부분의 은은한 AO 그림자"라는
-  // 실제 벽 재질 스펙을 그대로 코드로 옮긴다. 채우기 자체도 배경 사진 평균 색
-  // (stage.png ≈ rgb(125,112,91))과 같은 따뜻한 무채색 계열의 어두운 버전으로 —
-  // 검정이나 보라가 아니라 "같은 돌바닥의 그림자 진 부분"처럼 보이게 한다.
-  // 위 접지 그림자의 절반(벽 안쪽)이 이 채우기로 덮여 사라지는 게 의도된 동작이다.
-  ctx.fillStyle = "rgba(40, 36, 31, 0.92)";
-  for (let row = 0; row < grid.rows; row++) {
-    for (let col = 0; col < grid.cols; col++) {
-      if (isWall(row, col)) {
-        ctx.fillRect(col * grid.tileSize, row * grid.tileSize, grid.tileSize, grid.tileSize);
-      }
-    }
-  }
-
   // 통로와 맞닿는 바깥 경계 변에만(=미로의 진짜 윤곽선) 베벨+AO를 그린다. 선이
   // 벽 칸 경계를 넘어 통로(바닥) 위로 새어나가지 않도록 벽 칸 전체를 클립 영역으로
-  // 잡고 그 안에서만 그린다.
+  // 잡고 그 안에서만 그린다. 채우기(타일 패턴이든 단색이든)에도 같은 클립을 써서
+  // 벽 칸 바깥으로 새지 않게 한다.
   const wallClip = new Path2D();
   for (let row = 0; row < grid.rows; row++) {
     for (let col = 0; col < grid.cols; col++) {
@@ -411,8 +444,30 @@ function buildWallLayer(stage: Stage): HTMLCanvasElement {
     }
   }
 
+  const pattern = wallTile ? ctx.createPattern(wallTile, "repeat") : null;
   ctx.save();
   ctx.clip(wallClip);
+  if (pattern) {
+    // 실사 벽 타일 — 위 WALL_TILE_SCALE 주석 참고.
+    ctx.save();
+    ctx.scale(WALL_TILE_SCALE, WALL_TILE_SCALE);
+    ctx.fillStyle = pattern;
+    ctx.fillRect(0, 0, mapWidth / WALL_TILE_SCALE, mapHeight / WALL_TILE_SCALE);
+    ctx.restore();
+  } else {
+    // 실사 타일이 없을 때(로드 실패 등)의 폴백 — tile-art-prompt-guide.md가
+    // 정의해 둔 "바닥보다 확실히 어두운 석재 턱" 재질 스펙을 단색으로 근사한다.
+    // 배경 사진 평균 색(stage.png ≈ rgb(125,112,91))과 같은 따뜻한 무채색 계열의
+    // 어두운 버전 — 검정이나 보라가 아니라 "같은 돌바닥의 그림자 진 부분"처럼.
+    ctx.fillStyle = "rgba(40, 36, 31, 0.92)";
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        if (isWall(row, col)) {
+          ctx.fillRect(col * grid.tileSize, row * grid.tileSize, grid.tileSize, grid.tileSize);
+        }
+      }
+    }
+  }
 
   // AO — 턱이 바닥과 맞닿는 지점에 지는 부드러운 그림자. 경계에 걸쳐 굵게 그리고
   // 클립으로 벽 안쪽 절반만 남긴다.
@@ -448,12 +503,29 @@ export function drawStage(
   background: HTMLImageElement | null,
   checkpointsActivated: readonly boolean[],
   round: Round,
+  tiles?: { floor: HTMLImageElement | null; wall: HTMLImageElement | null },
 ): void {
   const { grid } = stage;
   const mapWidth = grid.cols * grid.tileSize;
   const mapHeight = grid.rows * grid.tileSize;
+  const floorTile = tiles?.floor ?? null;
+  const wallTile = tiles?.wall ?? null;
 
-  if (background) {
+  if (floorTile) {
+    // 실사 바닥 타일이 있으면 정적 배경 사진(stage.png) 대신 이걸로 채운다 —
+    // buildFloorTileLayer 주석 참고. 타일 이미지 자체가 바뀔 일은 없지만
+    // (같은 라운드 중 로드가 실패했다가 성공하는 경우는 없음) 크기 변경
+    // 방어 체크는 floorGrainLayer와 동일하게 남겨둔다.
+    if (
+      !floorTileLayer ||
+      floorTileLayer.tile !== floorTile ||
+      floorTileLayer.width !== mapWidth ||
+      floorTileLayer.height !== mapHeight
+    ) {
+      floorTileLayer = { canvas: buildFloorTileLayer(mapWidth, mapHeight, floorTile), tile: floorTile, width: mapWidth, height: mapHeight };
+    }
+    ctx.drawImage(floorTileLayer.canvas, 0, 0);
+  } else if (background) {
     ctx.drawImage(background, 0, 0, mapWidth, mapHeight);
   } else {
     ctx.fillStyle = "#111";
@@ -491,27 +563,34 @@ export function drawStage(
   ctx.fillStyle = atmosphere.vignette;
   ctx.fillRect(0, 0, mapWidth, mapHeight);
 
-  // 바닥 grain — 벽 레이어보다 먼저 그려서 벽 칸 위는 자연히 덮이고, 통로
-  // (걸어다니는 바닥) 위에만 보이게 한다.
-  if (!floorGrainLayer || floorGrainLayer.width !== mapWidth || floorGrainLayer.height !== mapHeight) {
-    floorGrainLayer = buildFloorGrain(mapWidth, mapHeight);
+  // 바닥 grain — 실사 타일이 없을 때만 그린다. 타일 자체에 이미 풍화·균열
+  // 질감이 있어서, 있는데도 이 절차적 노이즈를 더 얹으면 서로 다른 스케일의
+  // 무늬 두 개가 겹쳐 지저분해진다(buildFloorGrain 주석 참고). 벽 레이어보다
+  // 먼저 그려서 벽 칸 위는 자연히 덮이고, 통로(걸어다니는 바닥) 위에만 보이게 한다.
+  if (!floorTile) {
+    if (!floorGrainLayer || floorGrainLayer.width !== mapWidth || floorGrainLayer.height !== mapHeight) {
+      floorGrainLayer = buildFloorGrain(mapWidth, mapHeight);
+    }
+    ctx.drawImage(floorGrainLayer, 0, 0);
   }
-  ctx.drawImage(floorGrainLayer, 0, 0);
 
   // 웅덩이(젖은 바닥 반사)는 여기서 그리지 않는다 — GameCanvas.tsx의 광원 루프가
   // 이 함수 이후에 훨씬 강한 빛 웅덩이 그라디언트를 그 위에 덧그려서, 여기서
   // 넣은 반사는 완전히 덮여 안 보였다(실측). 램프별 빛 웅덩이 바로 다음
   // 단계에서 그리도록 그쪽으로 옮겼다 — drawPuddleReflection 참고.
 
-  // 벽 채우기+AO+베벨은 stage가 바뀌기 전까지 절대 안 변하는 정적 레이어라
-  // buildWallLayer()가 오프스크린 캔버스에 미리 그려둔 걸 매 프레임 한 번의
-  // drawImage로만 합성한다(파일 상단 wallLayerCache 주석 참고).
-  let wallLayer = wallLayerCache.get(stage);
-  if (!wallLayer) {
-    wallLayer = buildWallLayer(stage);
-    wallLayerCache.set(stage, wallLayer);
+  // 벽 채우기(타일 패턴 또는 폴백 단색)+AO+베벨은 stage가 바뀌기 전까지 절대
+  // 안 변하는 정적 레이어라 buildWallLayer()가 오프스크린 캔버스에 미리 그려둔
+  // 걸 매 프레임 한 번의 drawImage로만 합성한다. 캐시 키에 wallTile 참조도
+  // 같이 넣어서, 이미지가 나중에 로드 완료되면(비동기라 첫 프레임엔 null일 수
+  // 있음) 자동으로 다시 그리게 한다 — stage만 키로 쓰면 타일 로드 전에 그려진
+  // 폴백 버전이 영영 캐싱된 채로 남는다.
+  let wallLayerEntry = wallLayerCache.get(stage);
+  if (!wallLayerEntry || wallLayerEntry.wallTile !== wallTile) {
+    wallLayerEntry = { layer: buildWallLayer(stage, wallTile), wallTile };
+    wallLayerCache.set(stage, wallLayerEntry);
   }
-  ctx.drawImage(wallLayer, 0, 0);
+  ctx.drawImage(wallLayerEntry.layer, 0, 0);
 
   // 세이브 포인트·골을 "제단 촛불"로 그린다 — 광원(육각 랜턴, 기하학적·서 있는
   // 기둥형)과 실루엣이 겹치면 둘을 헷갈리게 되므로, 촛불은 각진 형태 없이 둥근

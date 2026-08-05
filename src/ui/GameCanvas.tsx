@@ -33,6 +33,7 @@ import {
 } from "../procgen/stageGenerator";
 import { drawPuddleReflection, drawStage, hexToRgbString } from "./drawStage";
 import { loadBackgroundArt } from "./backgroundArt";
+import { loadTileArt, type TileArt } from "./tileArt";
 import {
   loadCharacterSprites,
   WALK_LEGS_OFFSET_X_PX,
@@ -255,6 +256,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const lastFootstepFrameRef = useRef(-1);
   const [sprites, setSprites] = useState<CharacterSprites | null>(null);
   const [background, setBackground] = useState<HTMLImageElement | null>(null);
+  const [tiles, setTiles] = useState<TileArt>({ floor: null, wall: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -273,6 +275,18 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     loadBackgroundArt()
       .then((loaded) => {
         if (!cancelled) setBackground(loaded);
+      })
+      .catch((error) => console.error(error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadTileArt()
+      .then((loaded) => {
+        if (!cancelled) setTiles(loaded);
       })
       .catch((error) => console.error(error));
     return () => {
@@ -517,7 +531,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // 활성화 상태는 래치라, 한 번 밟은 세이브 포인트는 그 스테이지가 끝날 때까지 유지된다.
       const checkpointsActivated = checkpointsReachedRef.current;
 
-      renderFrame(ctx, stage, sprites, background, {
+      renderFrame(ctx, stage, sprites, background, tiles, {
         characterPos: characterRef.current,
         shadowAngle: shadowAngleRef.current,
         bodyPose,
@@ -540,7 +554,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, background, audioEngineRef]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, background, tiles, audioEngineRef]);
 
   return (
     <>
@@ -810,6 +824,7 @@ function renderFrame(
   stage: Stage,
   sprites: CharacterSprites,
   background: HTMLImageElement | null,
+  tiles: TileArt,
   state: RenderState,
 ) {
   const {
@@ -849,7 +864,7 @@ function renderFrame(
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
   ctx.translate(-camX, -camY);
 
-  drawStage(ctx, stage, background, checkpointsActivated, round);
+  drawStage(ctx, stage, background, checkpointsActivated, round, tiles);
 
   // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 이 연분홍
   // (#dcafbe)은 background-art-prompt-guide.md 컬러 팔레트가 "안전구역 경계선
