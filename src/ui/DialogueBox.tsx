@@ -150,9 +150,15 @@ const boxStyle: CSSProperties = {
   // 극단적으로 좁아지는 경우에 대한 마지막 방어선으로 유지한다.
   minWidth: 320,
   // 오른쪽에 튀어나온 초상과 텍스트가 겹치지 않도록 텍스트 쪽만 오른쪽 여백을 크게
-  // 둔다 — 초상 폭(PORTRAIT_WIDTH_CSS)과 같은 식을 재사용해, 박스가 좁아져 초상이
-  // 작아지면 여백도 같이 줄어들게 한다(고정 여백이면 좁은 화면에서 텍스트 컬럼이
-  // 필요 이상으로 좁아진다 — PR #23 리뷰).
+  // 둔다 — 초상 폭(PORTRAIT_WIDTH_CSS)과 같은 식을 재사용한다. 겹칠 여지가 없는
+  // 이유: CSS 스펙상 padding의 %는 이 요소의 부모(overlayStyle) 너비를 기준으로
+  // 계산되고, portraitStyle.width의 %는 box 자신의 렌더링된 너비를 기준으로
+  // 계산된다 — 서로 다른 기준값이지만, box 너비는 항상 부모 너비 이하이고
+  // clamp()는 입력에 대해 단조증가이므로 "부모 기준 40%"는 항상 "box 기준 40%"
+  // 이상이 된다. 즉 이 padding은 항상 실제 필요한 최소치보다 넉넉하게 계산된다
+  // (box가 minWidth/maxWidth에 걸려 부모의 정확히 80%가 아닐 때는 더 넉넉해짐) —
+  // 손해는 텍스트 컬럼이 이론상 최소치보다 살짝 좁아지는 정도뿐, 겹침은
+  // 구조적으로 불가능하다(PR #23 리뷰).
   padding: `12px calc(${PORTRAIT_WIDTH_CSS} + ${PORTRAIT_RIGHT_OFFSET_PX + 8}px) 12px 16px`,
   background: "rgba(20, 20, 20, 0.92)",
   border: "1px solid #666",
