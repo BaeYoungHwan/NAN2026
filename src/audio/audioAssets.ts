@@ -1,4 +1,4 @@
-import { BGM, SFX, SFX_CUES, type BgmCue, type SfxCue } from "./soundCues";
+import { SFX, SFX_CUES, type SfxCue } from "./soundCues";
 
 /**
  * 오디오 에셋 로더.
@@ -14,16 +14,13 @@ const ASSET_BASE = `${import.meta.env.BASE_URL}assets/audio/`;
 
 export type SfxBuffers = Record<SfxCue, AudioBuffer | null>;
 
-/** 큐의 실제 요청 URL. BGM은 버퍼로 디코딩하지 않고 이 URL을 그대로 <audio>에 넘긴다. */
+/** 큐 파일명의 실제 요청 URL. */
 export function assetUrl(file: string): string {
   return ASSET_BASE + file;
 }
 
-export function bgmUrl(cue: BgmCue): string {
-  return assetUrl(BGM[cue].file);
-}
-
-async function decodeSfx(ctx: BaseAudioContext, file: string): Promise<AudioBuffer> {
+/** 오디오 파일 하나를 fetch해 디코딩한다 — 효과음 프리로드와 BGM 지연 로드가 함께 쓴다. */
+export async function decodeAudioFile(ctx: BaseAudioContext, file: string): Promise<AudioBuffer> {
   const response = await fetch(assetUrl(file));
   if (!response.ok) throw new Error(`오디오 로드 실패(${response.status}): ${file}`);
   const encoded = await response.arrayBuffer();
@@ -36,14 +33,14 @@ async function decodeSfx(ctx: BaseAudioContext, file: string): Promise<AudioBuff
  * 효과음을 전부 AudioBuffer로 미리 디코딩한다 — 재생 시점에 디코딩하면 첫 재생이
  * 늦어 사망·경고음처럼 즉각적이어야 하는 소리가 밀린다.
  *
- * BGM은 여기서 다루지 않는다: 16~24초짜리를 통째로 메모리에 디코딩할 이유가 없고,
- * HTMLAudioElement로 스트리밍하면 해당 라운드에 진입할 때만 네트워크를 쓴다.
+ * BGM은 여기서 다루지 않는다: 5곡을 전부 시작 시점에 받을 이유가 없고, 해당 라운드에
+ * 진입할 때만 네트워크를 쓰도록 `AudioEngine`이 `playBgm` 호출 시점에 지연 디코딩한다.
  */
 export async function loadSfxBuffers(ctx: BaseAudioContext): Promise<SfxBuffers> {
   const entries = await Promise.all(
     SFX_CUES.map(async (cue) => {
       try {
-        return [cue, await decodeSfx(ctx, SFX[cue].file)] as const;
+        return [cue, await decodeAudioFile(ctx, SFX[cue].file)] as const;
       } catch {
         // 에셋이 아직 없는 것은 정상 상태다 — 경고를 남기지 않는다(빈 폴더로
         // 개발할 때 콘솔이 실패 로그로 가득 차면 진짜 오류를 놓친다).

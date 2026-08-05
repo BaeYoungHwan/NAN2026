@@ -115,16 +115,9 @@ export function useAudio(): GameAudio {
       // 컨텍스트가 아직 없으면(초기화 전이거나 WebAudio 미지원) 다음 입력에서 다시 본다.
       if (!context || context.state !== "suspended") return;
 
-      context
-        .resume()
-        .then(() => {
-          // 잠금 때문에 재생이 거부됐던 BGM을 다시 밀어준다. 엔진이 아직 없으면
-          // 준비 완료 시점의 `ready` 갱신이 BGM 재생을 다시 걸어준다.
-          engineRef.current?.resumeBgm();
-        })
-        .catch(() => {
-          // 제스처로 인정되지 않은 경우 — 리스너가 살아 있으므로 다음 입력에서 재시도된다.
-        });
+      context.resume().catch(() => {
+        // 제스처로 인정되지 않은 경우 — 리스너가 살아 있으므로 다음 입력에서 재시도된다.
+      });
     };
 
     window.addEventListener("keydown", unlock);
