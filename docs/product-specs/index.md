@@ -9,6 +9,9 @@ PRD와 기획 문서를 여기에 보관합니다.
 | 문서 | 버전 | 상태 | 생성일 |
 |------|------|------|--------|
 | [`PRD-v1.md`](PRD-v1.md) | v1 | Draft | 2026-07-22 |
+| [`ai-usage-report.md`](ai-usage-report.md) | v1 | Draft | 2026-08-03 |
+| [`team-roles.md`](team-roles.md) | v1 | Draft | 2026-08-03 |
+| [`game-intro.md`](game-intro.md) | v1 | Draft | 2026-08-03 |
 
 ---
 

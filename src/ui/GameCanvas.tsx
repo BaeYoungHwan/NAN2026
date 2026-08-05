@@ -1,13 +1,16 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MutableRefObject } from "react";
+import type { AudioEngine } from "../audio/audioEngine";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
+import { debugRoundFromQuery } from "../core/debugRound";
 import {
-  advanceRound,
   controlsReversed,
   effectiveAngleTolerance,
+  hasTouchedCheckpoint,
   isGuideVisible,
-  roundTarget,
+  respawnPointFor,
+  roundAfterClear,
   type Round,
 } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/character";
@@ -23,9 +26,11 @@ import {
   SAFE_ANGLE_TOLERANCE,
   SHADOW_LENGTH,
   generateStage,
+  seedForRound,
 } from "../procgen/stageGenerator";
-import { applyLearning, cellKey, MAX_AI_BLOCKS } from "../ai/pathBlocker";
-import { drawStage } from "./drawStage";
+import { drawPuddleReflection, drawStage, hexToRgbString } from "./drawStage";
+import { loadBackgroundArt } from "./backgroundArt";
+import { loadTileArt, type TileArt } from "./tileArt";
 import {
   loadCharacterSprites,
   WALK_LEGS_OFFSET_X_PX,
@@ -38,7 +43,12 @@ import {
 } from "./characterSprites";
 
 const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
-const TARGET_RADIUS = 40; // 세이브 포인트·골 도달 판정 반경(px)
+// 광원(가로등) 불빛 색 — hex 하나로만 두고 rgb 문자열(그라디언트용)은
+// hexToRgbString으로 파생시킨다. 예전엔 이 색을 hex/rgb 리터럴로 여러 곳에
+// (빛 웅덩이, 광선, 랜턴 몸통, 그림자, 웅덩이 반사) 따로 박아넣어 하나만
+// 바꾸면 나머지가 조용히 어긋나는 구조였다(PR #17 리뷰).
+const LANTERN_COLOR_ACTIVE = "#f5d547";
+const LANTERN_COLOR_INACTIVE = "#8a7a3a";
 const DEATH_ANIM_MS = 1600; // 사망 시 4단계 애니메이션을 보여주는 동안 멈추는 시간
 const BODY_DISPLAY_HEIGHT = 42; // 충돌 판정(CHARACTER_RADIUS)과 무관한 순수 표시 크기
 const CAMERA_ZOOM = 2.2; // 캐릭터를 따라다니며 확대하는 배율 — 맵 전체 대신 주변만 크게 보여준다
@@ -161,6 +171,16 @@ interface GameCanvasProps {
   onRoundChange?: (round: Round, stageCleared: boolean) => void;
   /** true인 동안 캐릭터 이동·그림자 회전·판정을 멈춘다 (저승사자 대사 표시 중 등). */
   inputDisabled?: boolean;
+  /**
+   * 효과음 재생용 오디오 엔진 참조 (`audio/useAudio.ts`). 엔진은 비동기로 준비되고
+   * 에셋이 없으면 아예 만들어지지 않으므로 항상 null일 수 있다 — 게임 진행은 이
+   * 값과 무관하게 동작해야 한다.
+   *
+   * 엔진 자체가 아니라 ref를 받는 이유: 뮤트 토글 등으로 오디오 상태가 바뀔 때마다
+   * 게임 루프(rAF)가 재시작되면 안 되는데, ref는 참조가 불변이라 아래 useEffect의
+   * 의존성에 들어가도 루프를 다시 만들지 않는다.
+   */
+  audioEngineRef?: MutableRefObject<AudioEngine | null>;
 }
 
 /**
@@ -169,51 +189,46 @@ interface GameCanvasProps {
  * - 그림자는 , . 로 직접 회전 (광원 위치와 무관, 자동 복귀 없음)
  * - 안전 구역(캐릭터 뒤, 광원 반대 방향 ± 허용각)은 광원-캐릭터 위치로 매 프레임 재계산됨
  * - 그림자 각도가 안전 구역을 벗어나면 사망 시퀀스(4단계 애니메이션, 약 1.6초) 후
- *   마지막 세이브 포인트로 리셋
- * - 하나의 스테이지(같은 통로)를 세이브 포인트로 구간을 나눠 1R→2R→3R 순서로
- *   이어서 진행한다. 세이브 포인트 통과 시 캐릭터 위치는 그대로 두고 다음
- *   라운드로 즉시 전환하며(텔레포트 없음), 그 지점이 새 리스폰 기준이 된다.
- *   마지막 라운드에서 최종 골 도달 시 스테이지 전체 클리어. 1R은 안전 구역
+ *   이 라운드 스테이지 안의 마지막 세이브 포인트(없으면 스폰)로 리셋
+ * - 1R→2R→3R은 각각 독립적으로 생성된 별도 스테이지다(`seedForRound`로 베이스
+ *   시드에서 결정론적으로 파생) — 한 라운드의 골에 도달하면 다음 라운드용 새
+ *   스테이지를 그 자리에서 생성해 전환한다(`loadStage`). 마지막 라운드(3R)에서
+ *   골에 도달하면 스테이지 교체 없이 전체 클리어로 처리한다. 1R은 안전 구역
  *   가이드라인(부채꼴)을 보여주고, 2R부터는 가이드라인을 숨긴다(그림자 색상
  *   피드백은 유지). 3R 디메리트: 허용 각도 축소 + WASD 이동키 상하좌우
  *   반전(그림자 회전키는 영향 없음) — PRD §7-1.
  * - 캐릭터 몸 포즈·그림자 표정은 alignmentMargin(위험도) 기준으로 함께 전환된다 — PRD §7-2.
- * - 이동 패턴 학습 AI(단순 빈도 기반, PRD §12): 캐릭터가 새 셀에 들어갈 때마다
- *   방문 횟수를 누적하고, 재시작 시 가장 자주 지나간 셀 중 스테이지를 풀 수
- *   없게 만들지 않는 셀만 골라 벽으로 추가한다(`src/ai/pathBlocker.ts`). 학습은
- *   세션 내에서만 누적되며(새로고침 시 초기화), 라운드/사망 리셋에는 영향 없음.
  *
- * 스테이지는 리액트 상태가 아니라 `stageRef`로 들고 있다 — 재시작마다 스테이지
- * 객체 자체가 바뀌는데(학습 반영), 게임 루프(rAF)가 그 시점에 아직 안 바뀐
+ * 스테이지는 리액트 상태가 아니라 `stageRef`로 들고 있다 — 라운드 전환·재시작마다
+ * 스테이지 객체 자체가 통째로 바뀌는데, 게임 루프(rAF)가 그 시점에 아직 안 바뀐
  * 클로저를 참조해 한두 프레임 옛 스테이지로 렌더링되는 걸 막기 위함이다.
  * 렌더링에 굳이 리액트 리렌더가 필요 없으므로(캔버스 하나만 그리는 구조) 상태로
  * 둘 이유가 없다.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
-  { onDeathCountChange, onRoundChange, inputDisabled = false },
+  { onDeathCountChange, onRoundChange, inputDisabled = false, audioEngineRef },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useKeyboardInput();
   // useState는 세터를 쓰지 않고 "한 번만 계산되는 초기값" 용도로만 쓴다 —
   // 실제 최신값은 항상 stageRef로 읽는다(위 주석 참고).
-  const [initialStage] = useState<Stage>(() => generateStage(DEFAULT_SEED));
+  const [initialRound] = useState<Round>(debugRoundFromQuery);
+  const [initialStage] = useState<Stage>(() => generateStage(seedForRound(DEFAULT_SEED, initialRound)));
   const stageRef = useRef<Stage>(initialStage);
   const characterRef = useRef<Point>({ ...stageRef.current.spawn });
   const shadowAngleRef = useRef(naturalAngle(stageRef.current.lightSources, stageRef.current.spawn));
   const deathCountRef = useRef(0);
-  const roundRef = useRef<Round>(1);
+  const roundRef = useRef<Round>(initialRound);
   const clearedRef = useRef(false);
-  // 마지막으로 통과한 세이브 포인트 — 사망 시 이 지점으로 리스폰한다(스폰 지점 아님).
-  const savePointRef = useRef<Point>({ ...stageRef.current.spawn });
+  // 이 스테이지의 세이브 포인트를 직접 밟아 활성화했는지 — `stage.checkpoints`와
+  // 순서·길이가 같다. 한 번 true가 되면 그 스테이지가 끝날 때까지 유지되고(래치),
+  // 사망 리스폰 지점(`respawnPointFor`)과 화면 표시가 모두 이 값만 본다.
+  const checkpointsReachedRef = useRef<boolean[]>(stageRef.current.checkpoints.map(() => false));
   // 직전 프레임의 최근접(활성) 광원 — 바뀌는 순간을 감지해 판정 유예를 주기 위함 (ADR-004).
   const activeLightRef = useRef<Point>(nearestLight(stageRef.current.lightSources, stageRef.current.spawn));
   // 광원 전환 유예 남은 시간(초) — 0보다 크면 이번 프레임 정렬 판정을 건너뛴다.
   const lightSwitchGraceRef = useRef(0);
-  // 이동 패턴 학습 AI — 캐릭터가 지나간 셀 방문 횟수. 세션 내내 누적(재시작해도 초기화 안 함).
-  const visitCountsRef = useRef(new Map<string, number>());
-  // 방문 카운트를 "셀에 들어간 순간"에만 올리기 위한 직전 셀 키(가만히 서 있는 시간은 세지 않음).
-  const lastVisitedCellKeyRef = useRef<string | null>(null);
   // stage 참조가 바뀔 때만(=재시작 시) 충돌판정 함수를 새로 만든다 — 매 프레임 재생성 방지.
   const colliderCacheRef = useRef<{ stage: Stage; canOccupy: (point: Point) => boolean } | null>(null);
   // 사망 시퀀스 진행 상태 — true인 동안 게임플레이가 멈추고 죽음 모션이 재생된다.
@@ -221,7 +236,13 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const deathAnimStartRef = useRef(0);
   // 마지막 수평 이동 방향 — 스프라이트가 원본은 오른쪽을 보고 있으므로 왼쪽 이동 시 좌우 반전한다.
   const facingRightRef = useRef(true);
+  // --- 오디오 타이밍 상태 (렌더에 영향을 주지 않으므로 전부 ref) ---
+  // 마지막으로 발소리를 낸 걷기 프레임 번호 — 걷기 애니메이션(WALK_FRAME_MS)과 발소리를
+  // 같은 주기로 묶어 발이 땅에 닿는 타이밍에 소리가 나게 한다. 멈추면 -1로 리셋한다.
+  const lastFootstepFrameRef = useRef(-1);
   const [sprites, setSprites] = useState<CharacterSprites | null>(null);
+  const [background, setBackground] = useState<HTMLImageElement | null>(null);
+  const [tiles, setTiles] = useState<TileArt>({ floor: null, wall: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -235,23 +256,56 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadBackgroundArt()
+      .then((loaded) => {
+        if (!cancelled) setBackground(loaded);
+      })
+      .catch((error) => console.error(error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadTileArt()
+      .then((loaded) => {
+        if (!cancelled) setTiles(loaded);
+      })
+      .catch((error) => console.error(error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 새 스테이지를 로드할 때 재설정해야 하는 상태를 한곳에 모은다 — 수동 재시작(1R부터)과
+  // 라운드 전환(다음 라운드 스테이지로) 양쪽이 공유한다.
+  function loadStage(nextStage: Stage) {
+    stageRef.current = nextStage;
+    characterRef.current = { ...nextStage.spawn };
+    shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
+    checkpointsReachedRef.current = nextStage.checkpoints.map(() => false);
+    activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
+    lightSwitchGraceRef.current = 0;
+    dyingRef.current = false;
+    facingRightRef.current = true;
+  }
+
   useImperativeHandle(
     ref,
     () => ({
+      // ?round= 디버그 진입점과 무관하게 항상 1R부터 다시 시작한다 — "재시작"은
+      // 게임을 처음부터 다시 플레이한다는 의미이지, 프리뷰 중이던 라운드로
+      // 돌아오는 버튼이 아니다. ?round=2/3으로 들어와 프리뷰하다 재시작을 누르면
+      // 1R로 넘어가는 게 의도된 동작이다. `seedForRound(DEFAULT_SEED, 1) ===
+      // DEFAULT_SEED`가 항상 성립해 `generateStage(DEFAULT_SEED)`와 결과가
+      // 같지만(초기화 로직 참고), 그 항등식이 나중에 바뀌면 여기가 조용히
+      // 어긋날 수 있으므로 `seedForRound`를 명시적으로 거쳐 대칭을 유지한다.
       restart: () => {
-        const previousStage = stageRef.current;
-        const nextStage = applyLearning(DEFAULT_SEED, previousStage, visitCountsRef.current, MAX_AI_BLOCKS);
-
-        stageRef.current = nextStage;
-        characterRef.current = { ...nextStage.spawn };
-        shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
-        savePointRef.current = { ...nextStage.spawn };
-        activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
-        lightSwitchGraceRef.current = 0;
+        loadStage(generateStage(seedForRound(DEFAULT_SEED, 1)));
         roundRef.current = 1;
-        lastVisitedCellKeyRef.current = null;
-        dyingRef.current = false;
-        facingRightRef.current = true;
         onRoundChange?.(1, false);
         clearedRef.current = false;
       },
@@ -272,7 +326,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     const draw = (time: number) => {
       const deltaSeconds = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
-      const stage = stageRef.current;
+      let stage = stageRef.current; // let: 라운드 전환 시 이 프레임 안에서 재할당된다(아래 참고)
 
       // 죽음 시퀀스·대사창·클리어 중에는 실제 게임플레이가 멈춰있으므로, 이
       // 시점에 물리적으로 눌려있는 방향키가 그대로 반영돼 캐릭터 방향이 바뀌거나
@@ -280,19 +334,24 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // 걷기 포즈가 재생되는(대사창 뜬 사이 이동키가 눌려있으면) 문제가 있었다 —
       // 아래 두 값은 실제 이동 처리가 일어나는 분기 안에서만 갱신한다.
       let isMoving = false;
+      const audio = audioEngineRef?.current ?? null;
 
       if (dyingRef.current) {
         if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
-          characterRef.current = { ...savePointRef.current };
-          shadowAngleRef.current = naturalAngle(stage.lightSources, savePointRef.current);
+          // 리스폰은 죽은 자리가 아니라 마지막으로 **직접 밟은** 세이브 포인트로
+          // 스냅한다 — 하나도 안 밟았으면 스폰으로 돌아간다(정상 플레이).
+          const respawnPoint = respawnPointFor(stage.spawn, stage.checkpoints, checkpointsReachedRef.current);
+          characterRef.current = { ...respawnPoint };
+          shadowAngleRef.current = naturalAngle(stage.lightSources, respawnPoint);
           // 리스폰으로 위치가 세이브 포인트로 튀는 것 자체가 "광원이 바뀐 것"처럼
           // 감지되어 유예가 걸리는 걸 막기 위해, 활성 광원 기준점도 같이 갱신한다.
-          activeLightRef.current = nearestLight(stage.lightSources, savePointRef.current);
+          activeLightRef.current = nearestLight(stage.lightSources, respawnPoint);
           // 죽기 직전 이동 방향이 남아있으면, 리스폰 직후 실제 이동 방향과 무관하게
           // 죽던 순간 보고 있던 방향을 그대로 유지해 버려서 캐릭터가 엉뚱한 쪽을
           // 보며 달리는 것처럼 보인다 — 리스폰 시 기본 방향(오른쪽)으로 되돌린다.
           facingRightRef.current = true;
           dyingRef.current = false;
+          audio?.play("respawn");
         }
       } else if (!clearedRef.current && !inputDisabled) {
         if (colliderCacheRef.current?.stage !== stage) {
@@ -302,16 +361,26 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         const moveInput = controlsReversed(roundRef.current)
           ? reverseMoveInput(inputRef.current)
           : inputRef.current;
-        characterRef.current = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
+        const moveResult = moveCharacter(characterRef.current, moveInput, deltaSeconds, canOccupy);
+        characterRef.current = moveResult.position;
+        // 벽에 부딪힌 축이 있으면 둔탁한 소리를 낸다 — 벽에 붙어 달리면 매 프레임
+        // 발생하므로 실제 재생 빈도는 큐 쿨다운(soundCues.ts)이 제한한다.
+        if (moveResult.blockedX || moveResult.blockedY) audio?.play("wallBump");
 
         if (moveInput.right) facingRightRef.current = true;
         else if (moveInput.left) facingRightRef.current = false;
         isMoving = moveInput.up || moveInput.down || moveInput.left || moveInput.right;
 
-        const visitKey = cellKey(stage.grid, characterRef.current);
-        if (visitKey !== lastVisitedCellKeyRef.current) {
-          visitCountsRef.current.set(visitKey, (visitCountsRef.current.get(visitKey) ?? 0) + 1);
-          lastVisitedCellKeyRef.current = visitKey;
+        // 발소리를 걷기 애니메이션과 같은 주기에 묶는다 — 프레임이 바뀌는 순간이
+        // 곧 발이 땅에 닿는 순간이라, 별도 타이머를 두면 그림과 소리가 어긋난다.
+        if (isMoving) {
+          const walkFrame = Math.floor(time / WALK_FRAME_MS);
+          if (walkFrame !== lastFootstepFrameRef.current) {
+            lastFootstepFrameRef.current = walkFrame;
+            audio?.play("footstep");
+          }
+        } else {
+          lastFootstepFrameRef.current = -1;
         }
 
         if (inputRef.current.rotateCW) {
@@ -319,6 +388,12 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         }
         if (inputRef.current.rotateCCW) {
           shadowAngleRef.current -= ROTATION_SPEED * deltaSeconds;
+        }
+        // 회전하는 동안만 이어지는 루프음. 엔진이 중복 호출을 무시하므로 매 프레임 불러도 된다.
+        if (inputRef.current.rotateCW || inputRef.current.rotateCCW) {
+          audio?.startLoop("rotateLoop");
+        } else {
+          audio?.stopLoop("rotateLoop");
         }
 
         // 최근접(활성) 광원이 바뀌는 순간을 감지해 판정 유예를 건다 — 광원 전환
@@ -329,26 +404,55 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         if (currentActiveLight.x !== activeLightRef.current.x || currentActiveLight.y !== activeLightRef.current.y) {
           lightSwitchGraceRef.current = LIGHT_SWITCH_GRACE_SECONDS;
           activeLightRef.current = currentActiveLight;
+          // 요구 각도가 방금 크게 바뀌었고 잠시 무적이라는 것을 알린다 — 이 소리가
+          // 없으면 플레이어는 왜 갑자기 그림자를 크게 돌려야 하는지 알 수 없다.
+          audio?.play("lightSwitch");
         }
 
-        // 체크포인트/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 광원 전환
-        // 경계선이 체크포인트 포착 반경과 우연히 겹치면(ADR-004), 도달하는 바로
-        // 그 프레임에 정렬이 깨질 수 있는데, 그 경우에도 "닿았다"는 사실은
-        // 항상 인정되어야 한다(도달 프레임엔 정렬 판정을 건너뜀). 그 외
-        // 구간에서는 기존과 동일하게 매 프레임 정렬을 검사한다.
-        const target = roundTarget(roundRef.current, stage.checkpoints, stage.goal);
-        const distanceToTarget = Math.hypot(characterRef.current.x - target.x, characterRef.current.y - target.y);
-        const reachedTarget = distanceToTarget <= TARGET_RADIUS;
+        // 이번 프레임에 세이브 포인트를 새로 밟았는지 — 활성화(래치)와, 그 프레임의
+        // 정렬 판정 스킵에 함께 쓴다. 스킵은 광원 전환 경계선과 체크포인트 근방이
+        // 우연히 겹칠 때(ADR-004) 불공정한 사망을 막기 위한 용도다.
+        let justReachedSavePoint = false;
+        stage.checkpoints.forEach((checkpoint, i) => {
+          if (checkpointsReachedRef.current[i]) return;
+          if (!hasTouchedCheckpoint(characterRef.current, checkpoint)) return;
+          checkpointsReachedRef.current[i] = true;
+          justReachedSavePoint = true;
+          audio?.play("checkpoint");
+        });
+        // 이 라운드 스테이지의 골에 실제로 접촉했는지 — 도달하면 다음 라운드용
+        // 새 스테이지로 전환하거나(마지막 라운드면) 전체 클리어된다. 세이브
+        // 포인트와 동일하게 물리적 접촉(hasTouchedCheckpoint)으로 판정한다 —
+        // 이전에는 진척도(스폰 기준 BFS 거리, goalProgress) 스칼라 비교였는데,
+        // 통로 폭 2칸이 만드는 막다른 갈래가 골보다 더 먼 BFS 거리를 가질 수 있어
+        // 골 근처에도 못 가고 그 갈래에 들어서기만 해도 클리어로 오판됐다(실측
+        // 확인). 세이브 포인트가 같은 이유로 이미 이 방식으로 바뀐 전례가 있다
+        // (`core/round.ts`의 `respawnPointFor` 주석 참고).
+        const justCleared = !clearedRef.current && hasTouchedCheckpoint(characterRef.current, stage.goal);
 
-        if (reachedTarget) {
-          const { round, stageCleared } = advanceRound(roundRef.current);
-          if (stageCleared) {
-            clearedRef.current = true;
-          } else {
-            savePointRef.current = { ...target };
+        // 세이브 포인트 활성화/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 그
+        // 프레임에 정렬이 깨져도 "진행했다"는 사실은 항상 인정되어야 한다(스킵).
+        // 그 외 구간에서는 기존과 동일하게 매 프레임 정렬을 검사한다.
+        if (justReachedSavePoint || justCleared) {
+          if (justCleared) {
+            const { round: nextRound, cleared } = roundAfterClear(roundRef.current);
+            // 진행이 멈추는 순간이므로 이어지던 회전 루프음도 함께 끊는다.
+            audio?.stopLoop("rotateLoop");
+            if (cleared) {
+              // 마지막 라운드(3R) 골 도달 = 전체 클리어 — 스테이지 교체 없이 그대로 둔다.
+              clearedRef.current = true;
+              audio?.play("clear");
+              onRoundChange?.(roundRef.current, true);
+            } else {
+              const nextStage = generateStage(seedForRound(DEFAULT_SEED, nextRound));
+              loadStage(nextStage);
+              stage = nextStage; // ★ 이번 프레임 렌더가 새 스테이지를 참조하도록 재할당(위 let 참고)
+              roundRef.current = nextRound;
+              audio?.play("roundUp");
+              onRoundChange?.(nextRound, false);
+            }
           }
-          roundRef.current = round;
-          onRoundChange?.(round, stageCleared);
+          // justReachedSavePoint만 true인 경우는 라운드 변화 없이 이번 프레임 정렬 판정만 스킵한다.
         } else {
           const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
           const natural = naturalAngle(stage.lightSources, characterRef.current);
@@ -358,6 +462,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
             dyingRef.current = true;
             deathAnimStartRef.current = time;
             deathCountRef.current += 1;
+            // 죽는 순간 이어지던 회전 루프음을 끊고 사망음으로 넘긴다 — 그대로 두면
+            // 죽어서 조작이 멈춘 뒤에도 회전음이 계속 난다.
+            audio?.stopLoop("rotateLoop");
+            audio?.play("death");
             onDeathCountChange?.(deathCountRef.current);
           }
         }
@@ -371,18 +479,28 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
       const natural = naturalAngle(stage.lightSources, characterRef.current);
       const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
+      // 게임플레이가 진행 중이 아니면(사망 연출·클리어·대사창 표시 중) 회전 루프음을 끈다 —
+      // 조작이 멈춘 상태에서 회전키를 누르고 있었다면 루프음이 그대로 남는다.
+      const playing = !dyingRef.current && !clearedRef.current && !inputDisabled;
+      if (!playing) {
+        audio?.stopLoop("rotateLoop");
+      }
+
       const deathInfo = dyingRef.current
         ? deathFrameInfo(time - deathAnimStartRef.current, DEATH_ANIM_MS, time)
         : undefined;
       const bodyPose: BodyPose = deathInfo ? deathInfo.current : selectBodyPose(margin, isMoving);
       const shadowExpression = selectShadowExpression(margin);
+      // 활성화 상태는 래치라, 한 번 밟은 세이브 포인트는 그 스테이지가 끝날 때까지 유지된다.
+      const checkpointsActivated = checkpointsReachedRef.current;
 
-      renderFrame(ctx, stage, sprites, {
+      renderFrame(ctx, stage, sprites, background, tiles, {
         characterPos: characterRef.current,
         shadowAngle: shadowAngleRef.current,
         bodyPose,
         shadowExpression,
         deathInfo,
+        checkpointsActivated,
         round: roundRef.current,
         cleared: clearedRef.current,
         dying: dyingRef.current,
@@ -399,7 +517,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
 
     frameId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frameId);
-  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites]);
+  }, [inputRef, onDeathCountChange, onRoundChange, inputDisabled, sprites, background, tiles, audioEngineRef]);
 
   return (
     <>
@@ -433,6 +551,8 @@ interface RenderState {
   shadowExpression: ShadowExpression;
   /** 사망 시퀀스 중일 때만 존재 — 프레임 간 크로스페이드·흔들림 연출에 쓴다. */
   deathInfo?: DeathFrameInfo;
+  /** `stage.checkpoints`와 순서·길이가 같은 활성화 여부 — 직접 밟은 세이브 포인트를 다른 색으로 표시한다. */
+  checkpointsActivated: readonly boolean[];
   round: Round;
   cleared: boolean;
   dying: boolean;
@@ -610,7 +730,28 @@ function drawRunDustEffect(ctx: CanvasRenderingContext2D, feetX: number, feetY: 
  * shadowAngle 방향으로 SHADOW_LENGTH만큼 떨어진 지점에 오도록 하고, 로컬
  * x(폭)는 그대로 둬 폭 축이 화면 수평을 유지한다(shadowTip 공식과 동일한
  * cos/sin 규약).
+ *
+ * x축(폭)을 항상 (1, 0)으로 고정하는 위 설계상, shadowAngle이 정확히 수평
+ * (0°/180°, sinθ≈0)이면 y축(높이) 기저벡터 (-stretch·cosθ, -stretch·sinθ)도
+ * 수평이 되어 두 축이 겹친다 — 즉 2D 이미지가 폭 0인 직선으로 찌그러져
+ * 화면에서 완전히 사라진다(브라우저 실측 검증 중 발견, 캔버스 픽셀 캡처로
+ * 재현). sinθ에 최소 크기(MIN_VERTICAL_RATIO)를 강제해 이 퇴화를 막는다 —
+ * 실제 각도가 아주 살짝 어긋나 보이는 대가로, 그림자가 항상 화면에 보이게
+ * 한다.
  */
+const MIN_VERTICAL_RATIO = 0.12;
+
+/**
+ * shadowAngle의 sin 성분에 최소 크기를 강제한다 — drawShadowSprite 주석 참고.
+ * sinθ가 0에 가까우면(수평 방향) 전단 변환의 y축 기저벡터가 x축과 겹쳐
+ * 그림자가 화면에서 완전히 사라지는 것을 막는다.
+ */
+export function shadowVerticalComponent(shadowAngle: number): number {
+  const sinTheta = Math.sin(shadowAngle);
+  const verticalSign = sinTheta < 0 ? -1 : 1;
+  return Math.abs(sinTheta) < MIN_VERTICAL_RATIO ? verticalSign * MIN_VERTICAL_RATIO : sinTheta;
+}
+
 function drawShadowSprite(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
@@ -629,10 +770,11 @@ function drawShadowSprite(
   // 피드백 — 가장자리를 블러로 부드럽게 풀어 윤곽선을 흐릿하게 만들고,
   // 완전한 검정에 가깝게 어둡혀 그림자다운 무게감을 준다.
   const tint = aligned ? "brightness(0)" : "brightness(0.4) sepia(1) hue-rotate(-50deg) saturate(5)";
+  const effectiveSin = shadowVerticalComponent(shadowAngle);
 
   ctx.save();
   ctx.translate(originX, originY);
-  ctx.transform(1, 0, -stretch * Math.cos(shadowAngle), -stretch * Math.sin(shadowAngle), 0, 0);
+  ctx.transform(1, 0, -stretch * Math.cos(shadowAngle), -stretch * effectiveSin, 0, 0);
   ctx.filter = `${tint} blur(2px)`;
   ctx.globalAlpha = 0.88;
   // drawBodySprite와 동일한 앵커(발=원점, 머리=-h 방향)를 그대로 재사용한다.
@@ -640,13 +782,21 @@ function drawShadowSprite(
   ctx.restore();
 }
 
-function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: CharacterSprites, state: RenderState) {
+function renderFrame(
+  ctx: CanvasRenderingContext2D,
+  stage: Stage,
+  sprites: CharacterSprites,
+  background: HTMLImageElement | null,
+  tiles: TileArt,
+  state: RenderState,
+) {
   const {
     characterPos,
     shadowAngle,
     bodyPose,
     shadowExpression,
     deathInfo,
+    checkpointsActivated,
     round,
     cleared,
     dying,
@@ -677,41 +827,140 @@ function renderFrame(ctx: CanvasRenderingContext2D, stage: Stage, sprites: Chara
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
   ctx.translate(-camX, -camY);
 
-  drawStage(ctx, stage);
+  drawStage(ctx, stage, background, checkpointsActivated, round, tiles);
 
-  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1)
+  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 이 연분홍
+  // (#dcafbe)은 background-art-prompt-guide.md 컬러 팔레트가 "안전구역 경계선
+  // UI 전용"으로 예약해 둔 포인트색이다. 벽 오버레이는 이 PR에서 석재 턱
+  // 재질(따뜻한 무채색, drawStage.ts의 buildWallLayer 참고)로 바뀌었으므로 더
+  // 이상 같은 색 계열이 아니다 — "위험 경계"라는 의미는 형태(부채꼴 vs 턱)로만
+  // 구분한다.
   if (isGuideVisible(round)) {
     ctx.beginPath();
     ctx.moveTo(characterPos.x, characterPos.y);
     ctx.arc(characterPos.x, characterPos.y, SAFE_ZONE_RADIUS, natural - tolerance, natural + tolerance);
     ctx.closePath();
-    ctx.fillStyle = "rgba(74, 144, 217, 0.25)";
+    ctx.fillStyle = "rgba(220, 175, 190, 0.25)";
     ctx.fill();
-    ctx.strokeStyle = "#4a90d9";
+    ctx.strokeStyle = "#dcafbe";
     ctx.lineWidth = 1;
     ctx.stroke();
   }
 
-  // 광원(가로등) — 여러 개 중 지금 판정에 쓰이는(최근접) 광원만 밝게 강조해,
-  // 안전 구역이 왜 이동했는지 플레이어가 알아볼 수 있게 한다 (ADR-004). 활성
-  // 광원은 캐릭터 반경(10px)보다 큰 바깥 링도 함께 그려, 캐릭터가 광원 바로
-  // 위에 서 있어도(예: 스폰 지점) 강조 표시가 가려지지 않게 한다.
+  // 광원(가로등) — 배경 이미지가 더 이상 가로등 기둥/구조를 그리지 않으므로
+  // (background-art-prompt-guide.md 2026-08-03 수정: "The lamps themselves should
+  // NOT be drawn as visible fixtures/posts... since the game engine renders actual
+  // lamp sprites separately"), 실제 가로등 형태를 그리는 책임이 전적으로 이 코드로
+  // 넘어왔다. 바닥 빛 웅덩이(방사형 그라디언트)만으로는 "여기 물리적으로 가로등이
+  // 서 있다"가 전달되지 않아, 캐릭터 스프라이트와 같은 정면 실루엣 관습으로 얇은
+  // 기둥 + 램프 머리를 웅덩이 중심 위에 세워 그린다. 여러 광원 중 지금 판정에
+  // 쓰이는(최근접) 광원만 밝게 강조해, 안전 구역이 왜 이동했는지 플레이어가
+  // 알아볼 수 있게 한다 (ADR-004).
   const activeLight = nearestLight(stage.lightSources, characterPos);
-  for (const light of stage.lightSources) {
+  stage.lightSources.forEach((light, lightIndex) => {
     const isActive = light === activeLight;
-    ctx.fillStyle = isActive ? "#f5d547" : "#8a7a3a";
+    const lanternColor = isActive ? LANTERN_COLOR_ACTIVE : LANTERN_COLOR_INACTIVE;
+    const lanternRgb = hexToRgbString(lanternColor);
+    const poolRadius = isActive ? 46 : 26;
+    const pool = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, poolRadius);
+    if (isActive) {
+      pool.addColorStop(0, `rgba(${lanternRgb}, 0.85)`);
+      pool.addColorStop(0.4, `rgba(${lanternRgb}, 0.35)`);
+      pool.addColorStop(1, `rgba(${lanternRgb}, 0)`);
+    } else {
+      pool.addColorStop(0, `rgba(${lanternRgb}, 0.5)`);
+      pool.addColorStop(1, `rgba(${lanternRgb}, 0)`);
+    }
+    ctx.fillStyle = pool;
     ctx.beginPath();
-    ctx.arc(light.x, light.y, isActive ? 8 : 5, 0, Math.PI * 2);
+    ctx.arc(light.x, light.y, poolRadius, 0, Math.PI * 2);
     ctx.fill();
 
+    // 웅덩이 반사 — 빛 웅덩이 바로 위에 그려야 안 덮인다(drawPuddleReflection
+    // 주석 참고). 활성/비활성 램프 색(위 pool 그라디언트와 동일한 rgb)을 그대로 써
+    // 이 램프 불빛을 반사하는 것처럼 보이게 한다.
+    drawPuddleReflection(ctx, light, lightIndex, lanternRgb);
+
+    // 가로등 실루엣 — 발판(기둥이 땅에 박힌 지점) + 위로 갈수록 가늘어지는 기둥 +
+    // 브래킷 + 캡 + 육각 랜턴(속 코어+헤일로) 구조로, 캐릭터 스프라이트와 같은
+    // 정면 실루엣 관습을 따른다. 기둥과 랜턴을 잇는 은은한 세로 광선으로 "이 빛
+    // 웅덩이가 바로 이 기둥에서 뿜어져 나온다"는 인과관계를 시각적으로 이어준다.
+    const poleHeight = isActive ? 22 : 15;
+    const poleColor = isActive ? "#2e2e2e" : "#1c1c1c";
+    const headY = light.y - poleHeight;
+    const r = isActive ? 7 : 5;
+
     if (isActive) {
-      ctx.strokeStyle = "#f5d547";
-      ctx.lineWidth = 2;
+      const beam = ctx.createLinearGradient(light.x, headY, light.x, light.y);
+      beam.addColorStop(0, `rgba(${lanternRgb}, 0.28)`);
+      beam.addColorStop(1, `rgba(${lanternRgb}, 0)`);
+      ctx.fillStyle = beam;
       ctx.beginPath();
-      ctx.arc(light.x, light.y, 16, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.moveTo(light.x - 5, headY);
+      ctx.lineTo(light.x + 5, headY);
+      ctx.lineTo(light.x + 1.5, light.y);
+      ctx.lineTo(light.x - 1.5, light.y);
+      ctx.closePath();
+      ctx.fill();
     }
-  }
+
+    // 발판 — 기둥이 땅에 서 있는 지점을 눌러주는 얕은 타원 그림자
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(light.x, light.y, 5, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 기둥 — 아래가 넓고 위가 좁은 사다리꼴로 그려 원기둥의 부피감을 흉내낸다.
+    ctx.fillStyle = poleColor;
+    ctx.beginPath();
+    ctx.moveTo(light.x - 2, light.y);
+    ctx.lineTo(light.x + 2, light.y);
+    ctx.lineTo(light.x + 1, headY + 3);
+    ctx.lineTo(light.x - 1, headY + 3);
+    ctx.closePath();
+    ctx.fill();
+
+    // 브래킷 — 랜턴이 기둥에 걸리는 지점의 작은 가로대
+    ctx.fillRect(light.x - r * 0.6, headY + 1, r * 1.2, 2);
+
+    // 캡 — 랜턴 위를 덮는 작은 삼각 지붕
+    ctx.fillStyle = poleColor;
+    ctx.beginPath();
+    ctx.moveTo(light.x, headY - r - 4);
+    ctx.lineTo(light.x - r, headY - r * 0.3);
+    ctx.lineTo(light.x + r, headY - r * 0.3);
+    ctx.closePath();
+    ctx.fill();
+
+    // 랜턴 몸통 — 육각형, 불빛이 채워진 안쪽 + 어두운 뼈대 테두리
+    if (isActive) {
+      ctx.shadowColor = LANTERN_COLOR_ACTIVE;
+      ctx.shadowBlur = 12;
+    }
+    ctx.fillStyle = lanternColor;
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 2;
+      const px = light.x + Math.cos(angle) * r;
+      const py = headY + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = poleColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 필라멘트 코어 — 랜턴 한가운데 더 밝은 점을 얹어 실제로 빛을 뿜는
+    // 광원처럼 보이게 한다(육각형 채우기만으로는 평면 스티커처럼 보임).
+    ctx.fillStyle = isActive ? "#fff3c4" : "#c9b96a";
+    ctx.beginPath();
+    ctx.arc(light.x, headY, r * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+  });
 
   // 그림자 — 죽음 시퀀스 중에는 그리지 않는다(몸만 죽음 모션으로 표시)
   if (!dying) {

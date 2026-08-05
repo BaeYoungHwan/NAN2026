@@ -13,7 +13,7 @@
 | [`architecture-layers.md`](architecture-layers.md) | 레이어 구조 및 허용/금지 의존성 |
 | [`ARD-v1.md`](ARD-v1.md) | 아키텍처 요건 명세 (품질 속성/제약) |
 | [`architecture-v1.md`](architecture-v1.md) | NAN2026 게임 아키텍처 초안 |
-| [`shadow-mechanic-diagram.md`](shadow-mechanic-diagram.md) | Shadow-Step 핵심 메커니즘 개념도 (팀 공유용) |
+| [`shadow-mechanic-diagram.md`](shadow-mechanic-diagram.md) | 돌려돌려 그림자 핵심 메커니즘 개념도 (팀 공유용) |
 | [`background-art-prompt-guide.md`](background-art-prompt-guide.md) | 스테이지 배경 이미지 — 외부 AI(GPT/마누스/제미나이) 생성 프롬프트 가이드 |
 
 ---

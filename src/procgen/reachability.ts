@@ -44,3 +44,44 @@ export function isReachable(grid: TileGrid, from: Point, to: Point): boolean {
 
   return false;
 }
+
+/**
+ * `from` 기준 모든 walkable 셀까지의 BFS 최단거리(스텝 수)를 계산한다 — 벽을 넘어갈 수
+ * 없으므로, 유클리드 거리와 달리 두 지점이 공간적으로 가까워도 벽으로 분리돼 있으면 항상
+ * 실제 통로 거리를 반환한다(`procgen/stageGenerator.ts`가 체크포인트·골 배치 검증에 쓴다).
+ * 미도달 셀(벽 또는 `from`과 연결되지 않은 영역)은 -1.
+ */
+export function bfsDistances(grid: TileGrid, from: Point): Int32Array {
+  const distances = new Int32Array(grid.cols * grid.rows).fill(-1);
+
+  const startCol = Math.floor(from.x / grid.tileSize);
+  const startRow = Math.floor(from.y / grid.tileSize);
+  const startKey = startRow * grid.cols + startCol;
+  if (grid.cells[startKey] === 1) return distances;
+
+  distances[startKey] = 0;
+  const queue: Array<[number, number]> = [[startCol, startRow]];
+
+  while (queue.length > 0) {
+    const [col, row] = queue.shift()!;
+    const dist = distances[row * grid.cols + col];
+
+    for (const [dc, dr] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const nc = col + dc;
+      const nr = row + dr;
+      if (nc < 0 || nc >= grid.cols || nr < 0 || nr >= grid.rows) continue;
+      const key = nr * grid.cols + nc;
+      if (distances[key] !== -1) continue;
+      if (grid.cells[key] === 1) continue;
+      distances[key] = dist + 1;
+      queue.push([nc, nr]);
+    }
+  }
+
+  return distances;
+}

@@ -1,4 +1,4 @@
-# Shadow-Step 핵심 메커니즘 개념도
+# 돌려돌려 그림자 — 핵심 메커니즘 개념도
 
 > 작성일: 2026-07-23 (v2 — 이중 조작 모델로 전면 정정) | 목적: 팀 공유용 — 캐릭터·그림자 이중 조작 메커니즘을 텍스트 설명 없이 한눈에 이해하기 위한 다이어그램
 > 관련 문서: [`PRD-v1.md`](../product-specs/PRD-v1.md), [`architecture-v1.md`](architecture-v1.md), [`ARD-v1.md`](ARD-v1.md), [`adr/ADR-002-shadow-dual-control.md`](adr/ADR-002-shadow-dual-control.md)
