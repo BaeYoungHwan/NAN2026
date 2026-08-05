@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assetUrl, bgmUrl, loadSfxBuffers } from "./audioAssets";
+import { assetUrl, loadSfxBuffers } from "./audioAssets";
 import { SFX, SFX_CUES } from "./soundCues";
 
 /** decodeAudioData만 흉내내는 최소 AudioContext 스텁 — 실제 디코딩은 검증 대상이 아니다. */
@@ -16,10 +16,6 @@ afterEach(() => {
 describe("assetUrl", () => {
   it("BASE_URL 아래 assets/audio/ 경로를 만든다 — Pages 서브패스 배포에서도 맞아야 한다", () => {
     expect(assetUrl("sfx/death.wav")).toBe(`${import.meta.env.BASE_URL}assets/audio/sfx/death.wav`);
-  });
-
-  it("BGM 큐는 설정된 파일명을 그대로 쓴다", () => {
-    expect(bgmUrl("round1")).toBe(assetUrl("bgm/round1.wav"));
   });
 });
 

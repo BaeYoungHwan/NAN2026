@@ -1,5 +1,5 @@
 import type { SfxBuffers } from "./audioAssets";
-import { bgmUrl } from "./audioAssets";
+import { decodeAudioFile } from "./audioAssets";
 import { BGM, SFX, type BgmCue, type SfxCue } from "./soundCues";
 
 /**
@@ -30,11 +30,6 @@ export interface AudioEngineOptions {
   muted?: boolean;
   /** 테스트에서 시간을 고정하기 위한 주입 지점. 기본은 performance.now(). */
   now?: () => number;
-  /**
-   * BGM용 <audio> 생성 지점. AudioContext.currentTime은 컨텍스트가 suspended면
-   * 흐르지 않으므로 쿨다운 기준으로 쓸 수 없고, 스트리밍 재생도 <audio>가 맡는다.
-   */
-  createAudioElement?: () => HTMLAudioElement;
 }
 
 interface ActiveLoop {
@@ -44,7 +39,7 @@ interface ActiveLoop {
 
 interface ActiveBgm {
   cue: BgmCue;
-  element: HTMLAudioElement;
+  source: AudioBufferSourceNode;
   gain: GainNode;
 }
 
@@ -52,7 +47,6 @@ export class AudioEngine {
   private readonly context: AudioContext;
   private readonly buffers: SfxBuffers;
   private readonly now: () => number;
-  private readonly createAudioElement: () => HTMLAudioElement;
 
   private readonly masterGain: GainNode;
   private readonly sfxBus: GainNode;
@@ -60,15 +54,17 @@ export class AudioEngine {
 
   private readonly lastPlayedAt = new Map<SfxCue, number>();
   private readonly activeLoops = new Map<SfxCue, ActiveLoop>();
+  private readonly bgmBufferCache = new Map<BgmCue, AudioBuffer>();
   private activeBgm: ActiveBgm | null = null;
+  /** 디코딩 중인 BGM 요청 큐 — 끝나기 전에 dispose되거나 다른 곡이 요청되면 결과를 버린다. */
+  private pendingBgmCue: BgmCue | null = null;
   private muted: boolean;
   private disposed = false;
 
-  constructor({ context, buffers, muted = false, now, createAudioElement }: AudioEngineOptions) {
+  constructor({ context, buffers, muted = false, now }: AudioEngineOptions) {
     this.context = context;
     this.buffers = buffers;
     this.now = now ?? (() => performance.now());
-    this.createAudioElement = createAudioElement ?? (() => new Audio());
     this.muted = muted;
 
     this.masterGain = context.createGain();
@@ -80,18 +76,6 @@ export class AudioEngine {
 
     this.bgmBus = context.createGain();
     this.bgmBus.connect(this.masterGain);
-  }
-
-  /**
-   * autoplay 잠금이 풀린 직후 호출된다 — 잠겨 있는 동안 거부됐던 BGM 재생을 다시 밀어준다.
-   *
-   * 컨텍스트를 깨우는 일(resume) 자체는 여기서 하지 않는다. 엔진은 효과음 디코딩이
-   * 끝나야 만들어지는데 첫 사용자 입력은 그보다 먼저 오는 것이 보통이라, 잠금 해제를
-   * 엔진에 맡기면 그 입력을 놓친다 — 컨텍스트를 소유한 `useAudio`가 담당한다.
-   */
-  resumeBgm(): void {
-    if (this.disposed) return;
-    this.activeBgm?.element.play().catch(() => {});
   }
 
   /**
@@ -174,37 +158,64 @@ export class AudioEngine {
   }
 
   /**
-   * BGM을 전환한다. 이미 같은 곡이 재생 중이면 아무 일도 하지 않으므로, 매 프레임
-   * 호출해도 안전하다. 다른 곡이 재생 중이면 크로스페이드로 넘어간다.
+   * BGM을 전환한다. 이미 같은 곡이 재생 중이거나 로딩 중이면 아무 일도 하지 않으므로,
+   * 매 프레임 호출해도 안전하다. 다른 곡이 재생 중이면 크로스페이드로 넘어간다.
+   *
+   * `<audio>` + `loop`가 아니라 디코딩한 버퍼를 `AudioBufferSourceNode.loop`로 재생한다.
+   * HTMLMediaElement의 네이티브 루프는 파형이 완전히 이어져 있어도 재생을 재시작하는
+   * 과정에서 미세하게 끊긴다 — 라운드 BGM처럼 16초 안팎으로 짧게 도는 트랙에서는 이
+   * 끊김이 매 바퀴 "치직" 소리로 들릴 만큼 두드러진다. AudioBufferSourceNode는 같은
+   * 오디오 그래프 안에서 샘플 단위로 이어 재생하므로 이 문제가 없다.
    */
   playBgm(cue: BgmCue): void {
-    if (this.disposed || this.activeBgm?.cue === cue) return;
+    if (this.disposed || this.activeBgm?.cue === cue || this.pendingBgmCue === cue) return;
+    this.pendingBgmCue = cue;
 
+    this.loadBgmBuffer(cue)
+      .then((buffer) => {
+        // 디코딩하는 동안 dispose됐거나 다른 곡이 다시 요청됐으면 이 결과는 버린다.
+        if (this.disposed || this.pendingBgmCue !== cue) return;
+        this.pendingBgmCue = null;
+        this.startBgm(cue, buffer);
+      })
+      .catch(() => {
+        // 파일이 없거나 디코딩이 실패해도 무음으로 넘어간다(에셋 폴백 계약).
+        if (this.pendingBgmCue === cue) this.pendingBgmCue = null;
+      });
+  }
+
+  /** BGM 버퍼는 처음 요청될 때만 디코딩해 캐시한다 — 안 쓰는 라운드 곡까지 미리 받지 않는다. */
+  private async loadBgmBuffer(cue: BgmCue): Promise<AudioBuffer> {
+    const cached = this.bgmBufferCache.get(cue);
+    if (cached) return cached;
+    const buffer = await decodeAudioFile(this.context, BGM[cue].file);
+    this.bgmBufferCache.set(cue, buffer);
+    return buffer;
+  }
+
+  private startBgm(cue: BgmCue, buffer: AudioBuffer): void {
     const previous = this.activeBgm;
     const config = BGM[cue];
-    const element = this.createAudioElement();
-    element.src = bgmUrl(cue);
-    element.loop = config.loop;
-    // 크로스페이드는 GainNode가 담당하므로 element 자체 음량은 최대로 둔다.
-    element.volume = 1;
+
+    const source = this.context.createBufferSource();
+    source.buffer = buffer;
+    source.loop = config.loop;
 
     const gain = this.context.createGain();
     gain.gain.value = 0;
     gain.gain.setTargetAtTime(config.volume, this.context.currentTime, BGM_FADE / 3);
 
-    const source = this.context.createMediaElementSource(element);
     source.connect(gain);
     gain.connect(this.bgmBus);
+    source.start();
 
-    // 파일이 없거나 autoplay가 아직 막혀 있으면 reject된다 — 둘 다 정상 상태로 넘긴다.
-    element.play().catch(() => {});
-
-    this.activeBgm = { cue, element, gain };
+    this.activeBgm = { cue, source, gain };
     if (previous) this.fadeOutBgm(previous);
   }
 
   /** 현재 BGM을 페이드아웃하고 멈춘다. */
   stopBgm(): void {
+    this.pendingBgmCue = null; // 로딩 중이던 요청도 취소한다
     if (!this.activeBgm) return;
     this.fadeOutBgm(this.activeBgm);
     this.activeBgm = null;
@@ -212,11 +223,13 @@ export class AudioEngine {
 
   private fadeOutBgm(bgm: ActiveBgm): void {
     bgm.gain.gain.setTargetAtTime(0, this.context.currentTime, BGM_FADE / 3);
-    // 페이드가 끝난 뒤 실제로 멈춘다 — 바로 pause하면 소리가 뚝 끊긴다.
-    setTimeout(() => {
-      bgm.element.pause();
+    // 페이드가 끝난 뒤 실제로 멈춘다 — 바로 stop하면 소리가 뚝 끊긴다.
+    const stopAt = this.context.currentTime + BGM_FADE;
+    bgm.source.stop(stopAt);
+    bgm.source.onended = () => {
+      bgm.source.disconnect();
       bgm.gain.disconnect();
-    }, BGM_FADE * 1000);
+    };
   }
 
   /**
@@ -241,9 +254,10 @@ export class AudioEngine {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.pendingBgmCue = null;
     for (const cue of [...this.activeLoops.keys()]) this.stopLoop(cue);
     if (this.activeBgm) {
-      this.activeBgm.element.pause();
+      this.activeBgm.source.stop();
       this.activeBgm = null;
     }
   }

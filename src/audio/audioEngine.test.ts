@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioEngine } from "./audioEngine";
 import type { SfxBuffers } from "./audioAssets";
 import { SFX_CUES } from "./soundCues";
@@ -44,23 +44,17 @@ function fakeContext() {
       sources.push(source);
       return source;
     }),
-    createMediaElementSource: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() })),
+    decodeAudioData: vi.fn(async () => bgmBuffer),
     resume: vi.fn(async () => {}),
   };
   return { context, sources, gains };
 }
 
-function fakeAudioElement() {
-  return {
-    src: "",
-    loop: false,
-    volume: 1,
-    play: vi.fn(async () => {}),
-    pause: vi.fn(),
-  };
-}
+/** playBgm의 디코딩 Promise 체인(fetch → arrayBuffer → decodeAudioData → then)이 다 풀리게 한다. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const buffer = { duration: 1 } as AudioBuffer;
+const bgmBuffer = { duration: 16 } as AudioBuffer;
 
 /** 모든 큐가 로드된 상태. */
 function allBuffers(): SfxBuffers {
@@ -212,76 +206,70 @@ describe("AudioEngine 루프 재생", () => {
 });
 
 describe("AudioEngine BGM", () => {
-  it("같은 곡을 다시 요청하면 무시한다 — 매 프레임 호출해도 재시작되지 않아야 한다", () => {
-    const { context } = fakeContext();
-    const elements: ReturnType<typeof fakeAudioElement>[] = [];
-    const engine = new AudioEngine({
-      context: context as unknown as AudioContext,
-      buffers: allBuffers(),
-      createAudioElement: () => {
-        const element = fakeAudioElement();
-        elements.push(element);
-        return element as unknown as HTMLAudioElement;
-      },
-    });
-
-    engine.playBgm("round1");
-    engine.playBgm("round1");
-
-    expect(elements).toHaveLength(1);
-    expect(elements[0].play).toHaveBeenCalledTimes(1);
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it("다른 곡으로 바꾸면 새 엘리먼트를 만들어 크로스페이드한다", () => {
-    const { context } = fakeContext();
-    const elements: ReturnType<typeof fakeAudioElement>[] = [];
-    const engine = new AudioEngine({
-      context: context as unknown as AudioContext,
-      buffers: allBuffers(),
-      createAudioElement: () => {
-        const element = fakeAudioElement();
-        elements.push(element);
-        return element as unknown as HTMLAudioElement;
-      },
-    });
+  function stubFetch(fetchImpl?: (url: string) => Promise<unknown>) {
+    const fetchMock = vi.fn(fetchImpl ?? (async (_url: string) => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) })));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("같은 곡을 다시 요청하면 무시한다 — 매 프레임 호출해도 재시작되지 않아야 한다", async () => {
+    stubFetch();
+    const { context, sources } = fakeContext();
+    const engine = new AudioEngine({ context: context as unknown as AudioContext, buffers: allBuffers() });
 
     engine.playBgm("round1");
+    engine.playBgm("round1"); // 디코딩 중 재요청 — pendingBgmCue로 무시돼야 한다
+    await flush();
+    engine.playBgm("round1"); // 재생 중 재요청
+    await flush();
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0].start).toHaveBeenCalledTimes(1);
+  });
+
+  it("다른 곡으로 바꾸면 새 소스를 만들어 크로스페이드한다", async () => {
+    const fetchMock = stubFetch();
+    const { context, sources } = fakeContext();
+    const engine = new AudioEngine({ context: context as unknown as AudioContext, buffers: allBuffers() });
+
+    engine.playBgm("round1");
+    await flush();
     engine.playBgm("round2");
+    await flush();
 
-    expect(elements).toHaveLength(2);
-    expect(elements[1].src).toContain("round2");
+    expect(sources).toHaveLength(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("round2");
+    // 이전 곡은 새 곡이 시작되며 페이드아웃되어 멈춘다.
+    expect(sources[0].stop).toHaveBeenCalled();
   });
 
-  it("컷신 곡은 루프하지 않고 라운드 곡은 루프한다", () => {
-    const { context } = fakeContext();
-    const elements: ReturnType<typeof fakeAudioElement>[] = [];
-    const engine = new AudioEngine({
-      context: context as unknown as AudioContext,
-      buffers: allBuffers(),
-      createAudioElement: () => {
-        const element = fakeAudioElement();
-        elements.push(element);
-        return element as unknown as HTMLAudioElement;
-      },
-    });
+  it("컷신 곡은 루프하지 않고 라운드 곡은 루프한다", async () => {
+    stubFetch();
+    const { context, sources } = fakeContext();
+    const engine = new AudioEngine({ context: context as unknown as AudioContext, buffers: allBuffers() });
 
     engine.playBgm("opening");
+    await flush();
     engine.playBgm("round1");
+    await flush();
 
-    expect(elements[0].loop).toBe(false);
-    expect(elements[1].loop).toBe(true);
+    expect(sources[0].loop).toBe(false);
+    expect(sources[1].loop).toBe(true);
   });
 
-  it("파일이 없어 재생이 거부돼도 예외가 새어나오지 않는다", () => {
-    const { context } = fakeContext();
-    const engine = new AudioEngine({
-      context: context as unknown as AudioContext,
-      buffers: allBuffers(),
-      createAudioElement: () =>
-        ({ ...fakeAudioElement(), play: vi.fn(async () => { throw new Error("재생 불가"); }) }) as unknown as HTMLAudioElement,
-    });
+  it("파일이 없어 디코딩이 실패해도 예외가 새어나오지 않는다", async () => {
+    stubFetch(async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(8) }));
+    const { context, sources } = fakeContext();
+    const engine = new AudioEngine({ context: context as unknown as AudioContext, buffers: allBuffers() });
 
     expect(() => engine.playBgm("round1")).not.toThrow();
+    await flush();
+
+    expect(sources).toHaveLength(0);
   });
 });
 

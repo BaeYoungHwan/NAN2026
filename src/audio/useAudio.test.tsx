@@ -39,9 +39,6 @@ class FakeAudioContext {
       stop: vi.fn(),
     };
   }
-  createMediaElementSource() {
-    return { connect: vi.fn(), disconnect: vi.fn() };
-  }
   async resume() {
     this.resumeCount++;
     this.state = "running";
