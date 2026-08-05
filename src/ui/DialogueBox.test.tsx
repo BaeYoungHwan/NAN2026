@@ -55,6 +55,13 @@ describe("DialogueBox", () => {
     expect(onAdvance).toHaveBeenCalledTimes(1);
   });
 
+  it("초상 이미지 로드에 실패하면 깨진 이미지 아이콘 대신 조용히 숨긴다", () => {
+    render(<DialogueBox queue={["대사"]} onAdvance={() => {}} />);
+    const img = screen.getByTestId("reaper-portrait");
+    fireEvent.error(img);
+    expect(screen.queryByTestId("reaper-portrait")).not.toBeInTheDocument();
+  });
+
   describe("autoDismissMs 지정 시", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());

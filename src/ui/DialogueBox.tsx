@@ -1,13 +1,21 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { SfxCue } from "../audio/soundCues";
 
 const PORTRAIT_SRC = `${import.meta.env.BASE_URL}assets/characters/reaper-portrait-neutral.png`;
 
-// 초상 표시 폭 + 박스 오른쪽 안쪽 오프셋 — portraitStyle.right와 boxStyle의 오른쪽
+// 초상 표시 폭 + 박스 오른쪽 안쪽 오프셋 — portraitStyle.width와 boxStyle의 오른쪽
 // padding이 이 두 값에서 각각 파생된다(아래 두 스타일 선언 참고). 하나로 묶어서
 // 값이 어긋나 텍스트가 초상 밑에 깔리는 회귀를 구조적으로 막는다(PR #23 리뷰).
-const PORTRAIT_WIDTH_PX = 180;
+//
+// 고정 180px이 아니라 clamp()인 이유 — 캔버스 뷰포트 축소(GameCanvas.tsx의
+// MIN_DISPLAY_SCALE=0.5) 시 .stage가 최소 400px까지 좁아지고, 그러면 이 박스
+// (width:80%)도 320px까지 줄어든다. 고정 180px 초상이면 텍스트 컬럼이 108px
+// (16px 폰트 기준 한 줄 6~7자)까지 밀려 가독성이 무너진다. 박스 폭의 40%를
+// 기준으로 두면 박스가 넓을 때(480px 근방)는 180px 상한에 걸려 기존과 동일하게
+// 보이고, 좁아질수록 초상도 같이 줄어 텍스트 폭을 어느 정도 지켜준다(320px
+// 기준 초상 128px → 텍스트 컬럼 160px, 108px보다 훨씬 낫다) (PR #23 리뷰).
+const PORTRAIT_WIDTH_CSS = "clamp(120px, 40%, 180px)";
 const PORTRAIT_RIGHT_OFFSET_PX = 8;
 // 원본 크롭 좌표(scripts/crop-reaper.mjs REGIONS[0].w/h = 122/118)와 짝을 이루는
 // aspectRatio — 크롭 좌표를 바꾸면 이 값도 함께 고쳐야 한다.
@@ -31,6 +39,9 @@ interface DialogueBoxProps {
  */
 function DialogueBox({ queue, onAdvance, autoDismissMs, playSound }: DialogueBoxProps) {
   const currentLine = queue[0];
+  // backgroundArt.ts/tileArt.ts와 같은 "에셋 없어도 정상 동작" 계약 — 초상 PNG가
+  // 404거나 손상됐으면 깨진 이미지 아이콘 대신 조용히 숨긴다(PR #23 리뷰).
+  const [portraitFailed, setPortraitFailed] = useState(false);
 
   // 새 대사가 뜰 때마다 등장음을 낸다. 넘김음(dialogueAdvance)과 달리 자동 사라짐으로
   // 넘어간 다음 줄에도 울려야 하므로, 조작 핸들러가 아니라 표시 자체에 묶는다.
@@ -80,7 +91,15 @@ function DialogueBox({ queue, onAdvance, autoDismissMs, playSound }: DialogueBox
             통과해버린다(PR #23 리뷰) — pointerEvents를 기본값(auto)으로 둬서 클릭이
             img에서 시작하되, DOM상 box의 자식이므로 버블링으로 box의 onClick까지
             그대로 이어지게 한다(별도 onClick을 달면 버블링과 겹쳐 두 번 호출된다). */}
-        <img src={PORTRAIT_SRC} alt="" data-testid="reaper-portrait" style={portraitStyle} />
+        {!portraitFailed && (
+          <img
+            src={PORTRAIT_SRC}
+            alt=""
+            data-testid="reaper-portrait"
+            style={portraitStyle}
+            onError={() => setPortraitFailed(true)}
+          />
+        )}
       </div>
     </div>
   );
@@ -103,14 +122,14 @@ const overlayStyle: CSSProperties = {
 // 중 기본(평상시) 표정 칸을 크롭한 것(scripts/crop-reaper.mjs). 초상을 박스 레이아웃
 // 흐름 밖으로 빼서(position: absolute) 박스 오른쪽 위 테두리를 뚫고 튀어나오게
 // 배치한다 — 박스 자체 높이는 텍스트로만 결정되고(portrait가 flex/grid 흐름에
-// 안 끼므로 텍스트 줄 수 이상으로 box를 늘리지 않는다), 초상은 원하는 크기
-// (PORTRAIT_WIDTH_PX) 그대로 유지된다. bottom을 박스 안쪽에 걸어 "박스 위에 서
+// 안 끼므로 텍스트 줄 수 이상으로 box를 늘리지 않는다), 초상은 박스 폭에 비례해
+// (PORTRAIT_WIDTH_CSS) 크기가 정해진다. bottom을 박스 안쪽에 걸어 "박스 위에 서
 // 있는" 느낌을 준다.
 const portraitStyle: CSSProperties = {
   position: "absolute",
   right: PORTRAIT_RIGHT_OFFSET_PX,
   bottom: 0,
-  width: PORTRAIT_WIDTH_PX,
+  width: PORTRAIT_WIDTH_CSS,
   aspectRatio: PORTRAIT_ASPECT_RATIO,
   objectFit: "contain",
   pointerEvents: "auto", // 기본값과 같지만, 위 주석의 "왜 auto여야 하는지"를 명시하려고 적어둔다.
@@ -126,15 +145,15 @@ const boxStyle: CSSProperties = {
   boxSizing: "border-box",
   width: "80%",
   maxWidth: 480,
-  // 좁은 화면(캔버스 축소 렌더링 등)에서 오른쪽 padding이 콘텐츠 폭을 0 이하로
-  // 밀어내 텍스트가 한 글자씩 세로로 흐르거나 박스 밖으로 넘치는 것을 막는
-  // 최소 안전장치(PR #23 리뷰).
+  // 좁은 화면(캔버스 축소 렌더링 등)에서 콘텐츠 폭이 0 이하로 밀리는 것을 막는
+  // 최소 안전장치(PR #23 리뷰) — PORTRAIT_WIDTH_CSS가 반응형이라도, 박스 자체가
+  // 극단적으로 좁아지는 경우에 대한 마지막 방어선으로 유지한다.
   minWidth: 320,
   // 오른쪽에 튀어나온 초상과 텍스트가 겹치지 않도록 텍스트 쪽만 오른쪽 여백을 크게
-  // 둔다 — 초상 폭 + 오른쪽 오프셋보다 넉넉하게 커야 한다(여유 8px 추가). 이 폭만큼
-  // 텍스트 컬럼이 좁아져 원래(초상 없을 때)보다 줄바꿈이 늘 수 있다 — 박스 높이가
-  // "텍스트로만 결정"되는 것과 "원래와 완전히 같은 줄 수"는 별개다.
-  padding: `12px ${PORTRAIT_WIDTH_PX + PORTRAIT_RIGHT_OFFSET_PX + 8}px 12px 16px`,
+  // 둔다 — 초상 폭(PORTRAIT_WIDTH_CSS)과 같은 식을 재사용해, 박스가 좁아져 초상이
+  // 작아지면 여백도 같이 줄어들게 한다(고정 여백이면 좁은 화면에서 텍스트 컬럼이
+  // 필요 이상으로 좁아진다 — PR #23 리뷰).
+  padding: `12px calc(${PORTRAIT_WIDTH_CSS} + ${PORTRAIT_RIGHT_OFFSET_PX + 8}px) 12px 16px`,
   background: "rgba(20, 20, 20, 0.92)",
   border: "1px solid #666",
   borderRadius: 8,
