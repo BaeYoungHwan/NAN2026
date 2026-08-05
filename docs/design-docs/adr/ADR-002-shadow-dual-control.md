@@ -7,9 +7,13 @@
 >
 > **2026-07-24 추가**: 라운드 시스템에 세이브 포인트(체크포인트) 개념이 도입되면서 "구현 시 주의사항"의
 > "리셋 시 `naturalAngle(light, spawn)`" 서술은 정정이 필요하다 — 사망 시 리스폰 지점은 스테이지의
-> 고정 `spawn`이 아니라 **마지막으로 통과한 세이브 포인트**(아직 하나도 통과 전이면 spawn)다. 공식은
+> 고정 `spawn`이 아니라 **마지막으로 활성화한 세이브 포인트**(아직 하나도 안 밟았으면 spawn)다. 공식은
 > `naturalAngle(light, savePoint)`로 일반화된 것으로 읽는다. 세부는 `src/core/stage.ts`의 `checkpoints`
-> 필드와 `src/ui/GameCanvas.tsx`의 `savePointRef` 참고.
+> 필드와 `src/ui/GameCanvas.tsx`의 `checkpointsReachedRef` 참고.
+>
+> **2026-08-04 정정**: 위 "활성화"는 캐릭터가 세이브 포인트를 **직접 밟는 것**(접촉 반경 40px,
+> `core/round.ts`의 `hasTouchedCheckpoint`)을 말한다. 한때 진행도 수치 비교로 판정했으나, 밟은 적
+> 없는 지점이 활성화되는 버그의 원인이라 접촉 판정으로 되돌렸다 — ADR-003 "버그 수정 기록 (2026-08-04)" 참고.
 
 ## 컨텍스트
 
