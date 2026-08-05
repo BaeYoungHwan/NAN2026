@@ -67,8 +67,8 @@ function DialogueBox({ queue, onAdvance, autoDismissMs, playSound }: DialogueBox
         <p style={nameStyle}>저승사자</p>
         <p style={lineStyle}>{currentLine}</p>
         {autoDismissMs === undefined && <p style={hintStyle}>클릭 또는 Enter/Space로 계속</p>}
+        <img src={PORTRAIT_SRC} alt="" style={portraitStyle} />
       </div>
-      <img src={PORTRAIT_SRC} alt="" style={portraitStyle} />
     </div>
   );
 }
@@ -80,34 +80,44 @@ const overlayStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
   display: "flex",
-  flexDirection: "row",
   alignItems: "flex-end",
   justifyContent: "center",
-  gap: 12,
   paddingBottom: 32,
   pointerEvents: "none",
 };
 
-// 대화 박스 오른쪽, 박스 바깥에 띄우는 저승사자 초상 — 시트의 "표정/반응 예시"
-// 그리드 중 기본(평상시) 표정 칸을 크롭한 것(scripts/crop-reaper.mjs). 박스 자체는
-// 계속 좁게 유지하고(가독성 우선 레이아웃 그대로), 초상만 옆에 겹치지 않게 별도
-// 요소로 나란히 놓아 "박스 밖에서 말을 거는" 느낌을 준다. 원본 크롭이 122×118이라
-// aspectRatio로 비율을 유지한 채 폭만 키운다(원본보다 커지지만, 삽화 스타일이라
-// 이 정도 확대는 흐려 보이지 않는다).
+// 대화 박스 안, 오른쪽 끝에 배치하는 저승사자 초상 — 시트의 "표정/반응 예시" 그리드
+// 중 기본(평상시) 표정 칸을 크롭한 것(scripts/crop-reaper.mjs). 박스 높이(세로 크기)는
+// 텍스트 기준 그대로 유지하면서 초상 크기도 그대로 키우고 싶다는 요구라, 메이플스토리류
+// NPC 대화창처럼 초상을 박스 레이아웃 흐름 밖으로 빼서(position: absolute) 박스
+// 오른쪽 위 테두리를 뚫고 튀어나오게 배치한다 — 박스 자체 높이는 텍스트만으로 결정되고
+// (portrait가 flex/grid 흐름에 안 끼므로 box를 늘리지 않는다), 초상은 원하는 크기(180px)
+// 그대로 유지된다. bottom을 박스 안쪽에 걸어 "박스 위에 서 있는" 느낌을 준다.
 const portraitStyle: CSSProperties = {
-  width: 140,
+  position: "absolute",
+  right: 8,
+  bottom: 0,
+  width: 180,
   aspectRatio: "122 / 118",
   objectFit: "contain",
+  pointerEvents: "none",
   filter: "drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))",
 };
 
 const boxStyle: CSSProperties = {
-  width: "60%",
-  maxWidth: 380,
+  position: "relative",
+  // boxSizing 없이 content-box(기본값)였을 때는 padding이 width/maxWidth 위에 그대로
+  // 더해져서, 오른쪽 padding을 키우자 박스 전체 가로 크기가 그만큼 커져 버렸다 —
+  // border-box로 바꿔 width/maxWidth가 padding 포함 "전체" 크기를 뜻하게 고정한다.
+  boxSizing: "border-box",
+  width: "80%",
+  maxWidth: 480,
+  // 오른쪽에 튀어나온 초상과 텍스트가 겹치지 않도록 텍스트 쪽만 오른쪽 여백을 크게 둔다 —
+  // 초상 폭(180) + 오른쪽 오프셋(8) = 188px보다 넉넉하게 커야 한다(196으로 여유 8px 추가).
+  padding: "12px 196px 12px 16px",
   background: "rgba(20, 20, 20, 0.92)",
   border: "1px solid #666",
   borderRadius: 8,
-  padding: "12px 16px",
   color: "#eee",
   fontFamily: "sans-serif",
   pointerEvents: "auto",
