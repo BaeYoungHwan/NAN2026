@@ -135,3 +135,21 @@
   결정되므로 표현할 수 없고, 쓰는 곳도 없어졌다). `checkpointProgress`는 남지만 용도가
   런타임 판정 → **배치 검증 전용**으로 축소됐다. `Stage.path`는 광원(가로등) 배치 기준으로만
   쓰인다.
+
+## 버그 수정 기록 (2026-08-05): 골에 도달하지 않았는데 클리어 판정되던 문제
+
+플레이 중 "골 근처에도 못 갔는데 클리어됐다"는 제보로 확인된 버그다. 바로 위 2026-08-04
+수정이 세이브 포인트에 대해서만 고치고 **골 자체**에는 남겨둔 같은 원인이었다 — 골 도달
+판정(`isStageCleared`)이 여전히 `farthestProgress >= goalProgress`, 즉 스칼라 BFS 거리
+비교였다. 통로 폭 2칸(`CORRIDOR_WIDTH`)이 만드는 막다른 갈래가 골보다 더 큰 BFS 거리를
+가지면, 골 쪽으로는 가지도 않고 그 갈래에 발을 들이기만 해도 "진척도가 골 진척도를
+넘었다"고 오판해 클리어 처리됐다.
+
+- **판정 교체**: 진행도 비교 → 세이브 포인트와 동일하게 **실제 접촉**
+  (`core/round.ts`의 `hasTouchedCheckpoint`를 `stage.goal`에 재사용, 반경 40px). 골에
+  물리적으로 닿아야만 클리어된다.
+- **폐기**: 런타임에서만 쓰이던 `progressAt`·`isStageCleared`(`core/round.ts`)와
+  `farthestProgressRef`(`ui/GameCanvas.tsx`)를 제거했다. `Stage.goalProgress`는 스테이지
+  생성 시 체크포인트 배치·오름차순 검증(`isAscendingProgress`)에는 계속 쓰이므로 남긴다 —
+  용도가 런타임 클리어 판정 → **배치 검증 전용**으로 축소된 것은 `checkpointProgress`가
+  겪은 것과 같은 궤적이다.

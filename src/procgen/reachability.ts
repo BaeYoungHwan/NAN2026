@@ -48,7 +48,7 @@ export function isReachable(grid: TileGrid, from: Point, to: Point): boolean {
 /**
  * `from` 기준 모든 walkable 셀까지의 BFS 최단거리(스텝 수)를 계산한다 — 벽을 넘어갈 수
  * 없으므로, 유클리드 거리와 달리 두 지점이 공간적으로 가까워도 벽으로 분리돼 있으면 항상
- * 실제 통로 거리를 반환한다(`core/round.ts`의 `progressAt`이 이 값을 진척도로 쓴다).
+ * 실제 통로 거리를 반환한다(`procgen/stageGenerator.ts`가 체크포인트·골 배치 검증에 쓴다).
  * 미도달 셀(벽 또는 `from`과 연결되지 않은 영역)은 -1.
  */
 export function bfsDistances(grid: TileGrid, from: Point): Int32Array {

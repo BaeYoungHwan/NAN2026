@@ -7,8 +7,6 @@
 
 /** 효과음 — 단발성(또는 키를 누르는 동안 루프)으로 재생되는 짧은 소리. */
 export type SfxCue =
-  | "dangerBeep"
-  | "safeReturn"
   | "rotateLoop"
   | "lightSwitch"
   | "death"
@@ -53,9 +51,6 @@ export interface BgmConfig {
 }
 
 export const SFX: Record<SfxCue, SfxConfig> = {
-  // 재생 간격은 dangerTone이 위험도에 따라 직접 제어하므로 쿨다운을 두지 않는다.
-  dangerBeep: { file: "sfx/danger-beep.wav", volume: 0.5 },
-  safeReturn: { file: "sfx/safe-return.wav", volume: 0.45, minIntervalMs: 400 },
   rotateLoop: { file: "sfx/rotate-loop.wav", volume: 0.3, loop: true },
   lightSwitch: { file: "sfx/light-switch.wav", volume: 0.5, minIntervalMs: 300 },
 

@@ -49,7 +49,7 @@
 > 맵 디자인(§B, 송원호 담당)에 물리지 않는 독립 작업으로 선행. 게임플레이 근거: 2R부터 안전 구역 가이드라인(부채꼴)이 사라져(`isGuideVisible`) 시각 피드백이 그림자 색상 하나로 줄어드는데, 위험도 비례 경고음이 그 공백을 메운다.
 
 - [x] 사운드 20종 자체 합성 — `scripts/generate-audio.mjs` (외부 의존성 0, Node 표준 라이브러리만). 외부 음원을 받지 않아 라이선스를 팀 소유로 확정. 포맷은 WAV(ffmpeg 부재로 mp3 인코딩 불가, `decodeAudioData`는 WAV 완전 지원). 총 4.5MB
-- [x] 오디오 엔진 — `src/audio/` 신설. GainNode 3단 믹서(cue→bus→master), 효과음은 `AudioBuffer` 프리로드·BGM은 `HTMLAudioElement` 스트리밍으로 분리, 큐별 쿨다운·피치 변조·루프 관리·BGM 크로스페이드
+- [x] 오디오 엔진 — `src/audio/` 신설. GainNode 3단 믹서(cue→bus→master), 효과음은 `AudioBuffer` 프리로드·BGM은 첫 재생 시점 지연 디코딩(둘 다 `AudioBufferSourceNode.loop` 재생 — 최초엔 BGM만 `HTMLAudioElement` 스트리밍이었으나, 루프 이음매마다 나던 크래클 때문에 PR #24에서 교체), 큐별 쿨다운·피치 변조·루프 관리·BGM 크로스페이드
 - [x] 에셋 폴백 — `ui/backgroundArt.ts`와 동일 계약. 파일이 없거나 손상된 큐만 null로 남기고 재생 요청을 조용히 무시한다. **오디오 폴더를 통째로 비운 상태로 브라우저 실측 검증 완료: 콘솔 에러 0건, 게임 전 구간 정상 진행**
 - [x] autoplay 정책 대응 — window 첫 입력(`keydown`/`pointerdown`, once)에서 `AudioContext.resume()`, 준비 전 요청된 BGM은 준비 완료 시 재시도(`ready` 플래그)
 - [x] 위험 경고음 — `dangerTone.ts`가 margin(0~1 연속값)을 재생 간격 500→120ms·음량 0.2→1.0으로 매핑. 임계값 0.6은 `selectBodyPose`/`selectShadowExpression`(몸 포즈 flinch·그림자 표정 surprised 전환점)과 일치시켜 시청각이 같은 순간에 반응하게 함

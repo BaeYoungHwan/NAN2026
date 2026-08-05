@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { TileGrid } from "./stage";
 import {
   CHECKPOINT_TOUCH_RADIUS,
   controlsReversed,
   effectiveAngleTolerance,
   hasTouchedCheckpoint,
   isGuideVisible,
-  isStageCleared,
   MAX_ROUND,
-  progressAt,
   respawnPointFor,
   roundAfterClear,
 } from "./round";
@@ -27,22 +24,6 @@ describe("isGuideVisible", () => {
   it("2R부터는 가이드라인을 숨긴다", () => {
     expect(isGuideVisible(2)).toBe(false);
     expect(isGuideVisible(3)).toBe(false);
-  });
-});
-
-describe("progressAt", () => {
-  const grid: TileGrid = { cols: 3, rows: 1, tileSize: 40, cells: new Uint8Array([0, 0, 0]) };
-  const distanceField = new Int32Array([0, 1, 2]);
-
-  it("캐릭터가 서 있는 셀의 distanceField 값을 반환한다", () => {
-    expect(progressAt(grid, distanceField, { x: 5, y: 10 })).toBe(0);
-    expect(progressAt(grid, distanceField, { x: 45, y: 10 })).toBe(1);
-    expect(progressAt(grid, distanceField, { x: 85, y: 10 })).toBe(2);
-  });
-
-  it("미도달(-1) 셀은 방어적으로 0을 반환한다", () => {
-    const withUnreached = new Int32Array([0, -1, 2]);
-    expect(progressAt(grid, withUnreached, { x: 45, y: 10 })).toBe(0);
   });
 });
 
@@ -102,17 +83,6 @@ describe("respawnPointFor", () => {
 
   it("체크포인트가 없는 스테이지에서는 항상 스폰으로 되돌린다", () => {
     expect(respawnPointFor(spawn, [], [])).toEqual(spawn);
-  });
-});
-
-describe("isStageCleared", () => {
-  it("골의 진척도(goalProgress)에 도달하지 못했으면 false다", () => {
-    expect(isStageCleared(7, 8)).toBe(false);
-  });
-
-  it("골의 진척도 이상이면 true다", () => {
-    expect(isStageCleared(8, 8)).toBe(true);
-    expect(isStageCleared(9, 8)).toBe(true);
   });
 });
 
