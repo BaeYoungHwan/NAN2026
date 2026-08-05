@@ -39,10 +39,20 @@ describe("DialogueBox", () => {
   });
 
   it("저승사자 초상 이미지를 올바른 경로로 렌더링한다", () => {
-    const { container } = render(<DialogueBox queue={["대사"]} onAdvance={() => {}} />);
-    // alt=""(장식 이미지)는 암묵적 role이 "presentation"이라 getByRole("img")로는
-    // 안 잡힌다 — querySelector로 직접 찾는다.
-    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("reaper-portrait-neutral"));
+    render(<DialogueBox queue={["대사"]} onAdvance={() => {}} />);
+    // data-testid로 조회 — alt=""(장식 이미지)는 암묵적 role이 "img"가 아니라
+    // "presentation"이라 getByRole("img")로는 안 잡힌다. (실제 파일 존재 여부까지
+    // 검증하는 안도 검토했으나, src/ 아래는 브라우저 전용 타입 경계를 지키느라
+    // node:fs를 안 쓰는 이 프로젝트 관례상 도입하지 않음 — PR #23 리뷰)
+    const img = screen.getByTestId("reaper-portrait");
+    expect(img).toHaveAttribute("src", expect.stringContaining("reaper-portrait-neutral"));
+  });
+
+  it("초상을 클릭해도 onAdvance가 호출된다 — 박스 밖으로 튀어나온 부분도 클릭 반응해야 함", () => {
+    const onAdvance = vi.fn();
+    render(<DialogueBox queue={["대사"]} onAdvance={onAdvance} />);
+    fireEvent.click(screen.getByTestId("reaper-portrait"));
+    expect(onAdvance).toHaveBeenCalledTimes(1);
   });
 
   describe("autoDismissMs 지정 시", () => {

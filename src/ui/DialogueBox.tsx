@@ -64,19 +64,23 @@ function DialogueBox({ queue, onAdvance, autoDismissMs, playSound }: DialogueBox
 
   if (!currentLine) return null;
 
+  const handleAdvanceClick = () => {
+    playSound?.("dialogueAdvance");
+    onAdvance();
+  };
+
   return (
     <div style={overlayStyle}>
-      <div
-        style={boxStyle}
-        onClick={() => {
-          playSound?.("dialogueAdvance");
-          onAdvance();
-        }}
-      >
+      <div style={boxStyle} onClick={handleAdvanceClick}>
         <p style={nameStyle}>저승사자</p>
         <p style={lineStyle}>{currentLine}</p>
         {autoDismissMs === undefined && <p style={hintStyle}>클릭 또는 Enter/Space로 계속</p>}
-        <img src={PORTRAIT_SRC} alt="" style={portraitStyle} />
+        {/* 초상이 박스 위 테두리를 뚫고 튀어나온 부분은 box의 레이아웃 박스 밖이라,
+            portraitStyle에 pointerEvents:none을 주면 그 부분 클릭이 캔버스로 그냥
+            통과해버린다(PR #23 리뷰) — pointerEvents를 기본값(auto)으로 둬서 클릭이
+            img에서 시작하되, DOM상 box의 자식이므로 버블링으로 box의 onClick까지
+            그대로 이어지게 한다(별도 onClick을 달면 버블링과 겹쳐 두 번 호출된다). */}
+        <img src={PORTRAIT_SRC} alt="" data-testid="reaper-portrait" style={portraitStyle} />
       </div>
     </div>
   );
@@ -109,7 +113,8 @@ const portraitStyle: CSSProperties = {
   width: PORTRAIT_WIDTH_PX,
   aspectRatio: PORTRAIT_ASPECT_RATIO,
   objectFit: "contain",
-  pointerEvents: "none",
+  pointerEvents: "auto", // 기본값과 같지만, 위 주석의 "왜 auto여야 하는지"를 명시하려고 적어둔다.
+  cursor: "pointer",
   filter: "drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))",
 };
 

@@ -118,7 +118,12 @@ async function crop() {
     const trimmed = cropRaw(data, info.width, info.channels, padLeft, padTop, r.w, r.h);
 
     const outPath = path.join(OUT_DIR, `${r.name}.png`);
-    await sharp(trimmed, { raw: { width: r.w, height: r.h, channels: info.channels } }).png().toFile(outPath);
+    // palette: true — 파레트 기반 PNG로 압축(PR #23 리뷰: 122×118에 31KB는 픽셀당
+    // ~2바이트로 과함). 반투명 경계(플러드필 alpha)가 있는 삽화라 팔레트화해도
+    // 육안 차이는 없고 용량만 크게 줄어든다.
+    await sharp(trimmed, { raw: { width: r.w, height: r.h, channels: info.channels } })
+      .png({ palette: true })
+      .toFile(outPath);
     console.log("wrote", outPath);
   }
 }
