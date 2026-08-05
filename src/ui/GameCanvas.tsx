@@ -74,43 +74,24 @@ const CAMERA_ZOOM = 2.2; // 캐릭터를 따라다니며 확대하는 배율 —
  * 2배면 육안상 충분히 선명하다.
  */
 const MAX_RENDER_SCALE = 2;
-/**
- * 캔버스 바깥 페이지 요소(제목 헤더·조작 안내 푸터·프레임 여백)가 차지하는 대략적인
- * 크기(px) — `src/index.css`의 `.page` 레이아웃 기준 실측값이다. 정확할 필요는 없고,
- * 1366×768 같은 작은 노트북 화면에서 캔버스가 잘리지 않을 만큼만 넉넉하면 된다.
- */
-const PAGE_CHROME_WIDTH = 48;
-// 1366×768(브라우저 크롬 제외 실측 innerHeight 730)에서 페이지 전체 높이가 캔버스
-// 높이 + 211px로 측정됐다 — 스크롤이 생기지 않도록 약간의 여유를 더한 값.
-const PAGE_CHROME_HEIGHT = 216;
-/** 표시 배율 하한 — 화면이 아주 작아도 이 아래로는 줄이지 않는다(그 경우 페이지가 스크롤된다). */
-const MIN_DISPLAY_SCALE = 0.5;
+/** 백킹 스토어 배율 하한 — 캔버스가 잠시 0px로 잡히는 경우에 대한 방어값이다. */
+const MIN_RENDER_SCALE = 0.25;
 
 /**
- * 뷰포트 크기에 맞춘 캔버스 **표시** 배율(CSS 픽셀 기준, 1 = 800×600 그대로).
+ * 실제로 그릴 백킹 스토어 배율 — 캔버스가 화면에서 차지하는 CSS 폭과 논리 폭
+ * (`CANVAS_WIDTH`)의 비에 기기 픽셀비를 곱한 값. 1이면 예전과 완전히 동일하다.
  *
- * 캔버스는 지금까지 800×600으로 못박혀 있어, 세로 768px짜리 노트북에서는 제목·푸터와
- * 합쳐 화면을 넘겼다. 논리 좌표계(800×600)는 그대로 두고 표시 크기만 줄이므로
- * 게임 로직·카메라 클램프·오프스크린 캐시에는 아무 영향이 없다.
+ * **크기는 CSS가 정한다**(`src/index.css`의 `.stage`). 이 함수는 그렇게 정해진
+ * 결과를 받아 백킹 스토어 해상도만 환산한다 — 예전처럼 뷰포트를 재서 페이지
+ * 헤더·푸터 높이를 상수로 빼는 계산은 더 이상 없다.
  *
- * 확대는 하지 않는다(상한 1) — 원본보다 키우면 스프라이트가 뭉개진다.
+ * 논리 좌표계(800×600)는 그대로라 게임 로직·카메라 클램프·오프스크린 캐시에는
+ * 아무 영향이 없고, `renderFrame`이 이 값을 기준 변환으로 한 번 깔아둔다.
+ * 상한을 두는 이유는 `MAX_RENDER_SCALE` 주석 참고.
  */
-export function canvasDisplayScale(viewportWidth: number, viewportHeight: number): number {
-  const byWidth = (viewportWidth - PAGE_CHROME_WIDTH) / CANVAS_WIDTH;
-  const byHeight = (viewportHeight - PAGE_CHROME_HEIGHT) / CANVAS_HEIGHT;
-  return clamp(Math.min(byWidth, byHeight), MIN_DISPLAY_SCALE, 1);
-}
-
-/**
- * 실제로 그릴 백킹 스토어 배율 — 표시 배율 × 기기 픽셀비, 상한 적용.
- *
- * 이 값이 1이 아니면 `renderFrame`이 기준 변환으로 깔아둔다. 지금까지는 backing
- * store가 항상 800×600이라 devicePixelRatio가 1이 아닌 환경(Windows 125~150% 배율,
- * 레티나)에서 브라우저가 그대로 확대해 전체 화면이 흐릿했다.
- */
-export function canvasRenderScale(displayScale: number, devicePixelRatio: number): number {
+export function canvasRenderScale(stageCssWidth: number, devicePixelRatio: number): number {
   const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
-  return clamp(displayScale * ratio, MIN_DISPLAY_SCALE, MAX_RENDER_SCALE);
+  return clamp((stageCssWidth / CANVAS_WIDTH) * ratio, MIN_RENDER_SCALE, MAX_RENDER_SCALE);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -360,30 +341,99 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   }, []);
 
   /**
-   * 캔버스의 표시 크기(CSS)와 백킹 스토어 크기(픽셀)를 뷰포트·기기 픽셀비에 맞춘다.
+   * 게임 화면(`.stage`)을 남는 공간에 맞춰 4:3으로 letterbox하고, 캔버스 백킹
+   * 스토어를 그 크기 × 기기 픽셀비로 맞춘다.
    *
-   * 렌더 루프와 분리된 별도 효과다 — 창 크기를 바꿔도 rAF 루프는 그대로 두고
-   * 캔버스 엘리먼트와 `renderScaleRef`만 갱신한다. `canvas.width` 대입은 컨텍스트
-   * 상태를 초기화하지만, `renderFrame`이 매 프레임 첫 줄에서 변환을 다시 세팅하므로
-   * 다음 프레임에 정상 복구된다.
+   * **크기 기준을 실측에서 얻는다** — 예전에는 뷰포트를 재고 페이지 헤더·푸터
+   * 높이를 상수(`PAGE_CHROME_HEIGHT = 216`)로 빼서 계산했다. 그 값은 `index.css`
+   * 레이아웃의 실측치라, 헤더 폰트 하나만 키워도 조용히 어긋나 스크롤이 생겼다.
+   * 이제 `.stage-frame`의 콘텐츠 박스를 직접 재므로 CSS를 어떻게 바꾸든 따라간다.
+   *
+   * `.stage`에 px를 써넣는 이유(순수 CSS로 안 되는 이유)는 `index.css`의 `.stage`
+   * 주석 참고 — 요약하면 `aspect-ratio`는 한 축이 확정되면 다른 축의 max가 걸려도
+   * 비율로 되돌리지 않아 letterbox가 깨진다.
+   *
+   * 렌더 루프와 분리된 별도 효과다 — 창 크기가 바뀌어도 rAF 루프는 그대로 두고
+   * 엘리먼트와 `renderScaleRef`만 갱신한다. `canvas.width` 대입은 컨텍스트 상태를
+   * 초기화하지만, `renderFrame`이 매 프레임 첫 줄에서 변환을 다시 세팅한다.
+   *
+   * `window.resize` 대신 `ResizeObserver`를 쓰는 이유:
+   * - 프레임당 한 번만 콜백하므로 드래그 리사이즈 중 백킹 스토어를 초당 수십 번
+   *   재할당하던 문제가 사라진다(별도 디바운스 불필요).
+   * - 창 크기가 그대로여도 레이아웃 변화(헤더 표시/숨김 등)까지 잡아낸다.
+   * - 관측 대상은 `.stage`도 `.stage-frame`도 아닌 `.stage-area`다. 앞의 둘은 크기가
+   *   `.stage`를 따라가므로(우리가 정하는 값) 관측 → 대입 → 재관측 순환이 된다.
    */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const stage = canvas?.parentElement;
+    // App이 렌더하는 바깥 구조: .stage-area(측정용) > .stage-frame(테두리) > .stage
+    const frame = canvas?.closest<HTMLElement>(".stage-frame");
+    const area = frame?.parentElement;
+    if (!canvas || !stage || !frame || !area) return;
+
+    const boxOf = (el: HTMLElement) => {
+      // clientWidth/Height는 **패딩 박스**(테두리 제외)라 패딩만 빼면 콘텐츠 박스가
+      // 나온다. getBoundingClientRect는 테두리까지 포함해 실제보다 크게 잡힌다.
+      const style = getComputedStyle(el);
+      return {
+        width: el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        height: el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+      };
+    };
 
     const applyScale = () => {
-      const displayScale = canvasDisplayScale(window.innerWidth, window.innerHeight);
-      const renderScale = canvasRenderScale(displayScale, window.devicePixelRatio);
+      const areaBox = boxOf(area);
+      // 프레임이 테두리·패딩으로 잡아먹는 몫을 뺀다 — 상수로 박지 않고 실측한다.
+      const frameChromeWidth = frame.offsetWidth - boxOf(frame).width;
+      const frameChromeHeight = frame.offsetHeight - boxOf(frame).height;
+      const availableWidth = areaBox.width - frameChromeWidth;
+      const availableHeight = areaBox.height - frameChromeHeight;
+      // 아직 레이아웃이 잡히지 않았거나 숨겨진 상태 — 다음 콜백에서 다시 본다.
+      if (availableWidth <= 0 || availableHeight <= 0) return;
+
+      // 가로·세로 중 더 빡빡한 쪽에 맞춰 4:3을 유지한다(확대는 하지 않는다 —
+      // 논리 해상도보다 키우면 스프라이트가 뭉개진다).
+      const fit = Math.min(availableWidth / CANVAS_WIDTH, availableHeight / CANVAS_HEIGHT, 1);
+      const cssWidth = Math.floor(CANVAS_WIDTH * fit);
+      // 폭만 정한다 — 높이는 `.stage`의 `aspect-ratio`가 서브픽셀까지 정확히 파생한다
+      // (양쪽을 각각 내림하면 비율이 0.1%쯤 어긋난다).
+      stage.style.width = `${cssWidth}px`;
+
+      const renderScale = canvasRenderScale(cssWidth, window.devicePixelRatio);
+      const width = Math.round(CANVAS_WIDTH * renderScale);
+      const height = Math.round(CANVAS_HEIGHT * renderScale);
+      // 같은 크기면 대입하지 않는다 — 불필요한 백킹 스토어 재할당·컨텍스트 초기화 방지.
+      if (canvas.width === width && canvas.height === height) return;
+
       renderScaleRef.current = renderScale;
-      canvas.width = Math.round(CANVAS_WIDTH * renderScale);
-      canvas.height = Math.round(CANVAS_HEIGHT * renderScale);
-      canvas.style.width = `${Math.round(CANVAS_WIDTH * displayScale)}px`;
-      canvas.style.height = `${Math.round(CANVAS_HEIGHT * displayScale)}px`;
+      canvas.width = width;
+      canvas.height = height;
     };
 
     applyScale();
-    window.addEventListener("resize", applyScale);
-    return () => window.removeEventListener("resize", applyScale);
+    const observer = new ResizeObserver(applyScale);
+    observer.observe(area);
+
+    // 배율이 다른 모니터로 창을 옮기면 devicePixelRatio만 바뀌고 CSS 크기는 그대로라
+    // ResizeObserver가 뜨지 않는다 — 그 변화를 따로 잡는다. 미디어 쿼리는 현재 dpr에
+    // 고정되므로, 한 번 발화하면 새 dpr 기준으로 다시 건다.
+    let dprQuery: MediaQueryList | null = null;
+    const watchDpr = () => {
+      dprQuery?.removeEventListener("change", onDprChange);
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprQuery.addEventListener("change", onDprChange);
+    };
+    function onDprChange() {
+      applyScale();
+      watchDpr();
+    }
+    watchDpr();
+
+    return () => {
+      observer.disconnect();
+      dprQuery?.removeEventListener("change", onDprChange);
+    };
   }, []);
 
   // 새 스테이지를 로드할 때 재설정해야 하는 상태를 한곳에 모은다 — 수동 재시작(1R부터)과

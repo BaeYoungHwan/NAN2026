@@ -44,8 +44,14 @@ body {
 
 /* ── 페이지 레이아웃 ─────────────────────────────────────────── */
 
+/*
+ * 높이를 `min-height`가 아니라 `height`로 못박는 것이 핵심이다 — 이게 확정
+ * 높이여야 아래 `.stage-frame`이 남는 공간을 계산할 수 있고, `.stage`의
+ * `max-height: 100%`가 실제 값으로 풀린다. `min-height`면 높이가 콘텐츠 기준이라
+ * 순환 참조가 되어 제약이 무시되고 캔버스가 화면 밖으로 자란다(실측 확인).
+ */
 .page {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -105,24 +111,69 @@ body {
 /* ── 게임 프레임 ─────────────────────────────────────────────── */
 
 /*
- * 오버레이(HUD·대사창·컷신·타이틀)가 `position: absolute; inset: 0`으로 이 요소를
- * 기준 삼는다. 따라서 크기는 항상 캔버스와 정확히 같아야 한다 — `inline-block`이
- * 안쪽 캔버스 크기를 그대로 따라가게 두고, 여기에 padding/border를 주지 않는다.
- * 테두리·그림자는 바깥의 .stage-frame이 담당한다.
+ * 게임 화면 크기는 **CSS가 정한다** — JS(GameCanvas)는 결정된 크기를 읽어
+ * 백킹 스토어만 맞춘다.
+ *
+ * 예전에는 반대였다: JS가 뷰포트를 재고 페이지 헤더·푸터 높이를 상수
+ * (PAGE_CHROME_HEIGHT=216)로 빼서 캔버스 CSS 크기를 계산해 써넣었다. 그 상수는
+ * 이 파일의 레이아웃을 실측한 값이라, 여기서 헤더 폰트 하나만 키워도 조용히
+ * 어긋나 페이지에 스크롤이 생겼다. 이제 그 상수가 필요 없다.
+ *
+ * 오버레이(HUD·대사창·컷신·타이틀)가 `position: absolute; inset: 0`으로 .stage를
+ * 기준 삼으므로, .stage에는 padding/border를 주지 않는다 — 테두리·그림자는
+ * 바깥의 .stage-frame이 담당한다.
+ */
+/*
+ * 실제 크기는 `GameCanvas`가 `.stage-frame`의 **콘텐츠 박스를 실측해** 인라인
+ * 스타일로 정확한 px를 넣는다. 아래 값들은 그 전(첫 페인트)에 쓰이는 폴백이다.
+ *
+ * 순수 CSS(`aspect-ratio` + `max-width/height`)로도 시도했지만 letterbox가 되지
+ * 않는다: 한 축이 확정되면 다른 축의 max가 걸려도 비율로 되돌려 계산되지 않아
+ * 4:3이 깨진다(520×730 뷰포트에서 477×537로 찌그러지는 것 실측). 안쪽 캔버스가
+ * `width/height: 100%`라 auto 크기로 두면 순환 참조가 되는 것도 걸림돌이다.
  */
 .stage {
   position: relative;
-  display: inline-block;
-  line-height: 0; /* 캔버스가 inline이면 생기는 baseline 여백 제거 */
+  /* 높이는 JS가 아니라 여기서 파생시킨다 — 가로·세로를 각각 정수로 내림하면
+     비율이 0.1%쯤 어긋나는데, 폭만 확정하고 높이를 aspect-ratio에 맡기면
+     서브픽셀까지 정확히 4:3이 유지된다. */
+  aspect-ratio: 800 / 600;
+  width: 800px; /* 폴백 — 첫 페인트 직후 GameCanvas가 실측 px로 덮어쓴다 */
+  max-width: 100%;
+  margin: auto;
   overflow: hidden;
   border-radius: 6px;
 }
 
 .stage canvas {
   display: block;
+  /* .stage를 꽉 채운다 — JS는 canvas.style을 건드리지 않는다. */
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * 헤더·푸터를 뺀 남는 공간을 그대로 차지하는 **측정용** 영역 — 눈에 보이는 건
+ * 없다. GameCanvas가 이 박스를 재서 `.stage` 크기를 정한다.
+ *
+ * `.stage-frame`(시각적 테두리)을 재면 안 되는 이유: 프레임은 콘텐츠를 감싸므로
+ * 폭이 `.stage`를 따라가고, 그걸 기준으로 다시 `.stage`를 정하면 순환이 되어
+ * 창을 넓혀도 캔버스가 커지지 않는다(실측 확인).
+ *
+ * min-height:0이 없으면 flex 아이템의 기본 min-height:auto 때문에 줄어들지 않아
+ * 콘텐츠가 화면을 넘긴다.
+ */
+.stage-area {
+  display: flex;
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
 }
 
 .stage-frame {
+  /* 남는 공간(.stage-area) 안에서 콘텐츠 크기만큼만 차지하고 가운데 놓인다. */
+  margin: auto;
   padding: 6px;
   border-radius: 10px;
   border: 1px solid rgba(255, 176, 87, 0.18);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildClearSummary, formatDuration } from "./App";
+import { buildClearSummary, formatDuration } from "./clearSummary";
 
 describe("formatDuration", () => {
   it("1분 미만은 초만 보여준다", () => {

@@ -8,13 +8,13 @@ const PORTRAIT_SRC = `${import.meta.env.BASE_URL}assets/characters/reaper-portra
 // padding이 이 두 값에서 각각 파생된다(아래 두 스타일 선언 참고). 하나로 묶어서
 // 값이 어긋나 텍스트가 초상 밑에 깔리는 회귀를 구조적으로 막는다(PR #23 리뷰).
 //
-// 고정 180px이 아니라 clamp()인 이유 — 캔버스 뷰포트 축소(GameCanvas.tsx의
-// MIN_DISPLAY_SCALE=0.5) 시 .stage가 최소 400px까지 좁아지고, 그러면 이 박스
-// (width:80%)도 320px까지 줄어든다. 고정 180px 초상이면 텍스트 컬럼이 108px
-// (16px 폰트 기준 한 줄 6~7자)까지 밀려 가독성이 무너진다. 박스 폭의 40%를
-// 기준으로 두면 박스가 넓을 때(480px 근방)는 180px 상한에 걸려 기존과 동일하게
-// 보이고, 좁아질수록 초상도 같이 줄어 텍스트 폭을 어느 정도 지켜준다(320px
-// 기준 초상 128px → 텍스트 컬럼 160px, 108px보다 훨씬 낫다) (PR #23 리뷰).
+// 고정 180px이 아니라 clamp()인 이유 — `.stage`(src/index.css)가 남는 공간에 맞춰
+// CSS로 축소되면 이 박스(width:80%)도 함께 좁아지고, 하한인 320px까지 줄어들 수
+// 있다. 고정 180px 초상이면 그때 텍스트 컬럼이 108px(16px 폰트 기준 한 줄 6~7자)
+// 까지 밀려 가독성이 무너진다. 박스 폭의 40%를 기준으로 두면 박스가 넓을 때
+// (480px 근방)는 180px 상한에 걸려 기존과 동일하게 보이고, 좁아질수록 초상도 같이
+// 줄어 텍스트 폭을 어느 정도 지켜준다(320px 기준 초상 128px → 텍스트 컬럼 160px,
+// 108px보다 훨씬 낫다) (PR #23 리뷰).
 const PORTRAIT_WIDTH_CSS = "clamp(120px, 40%, 180px)";
 const PORTRAIT_RIGHT_OFFSET_PX = 8;
 // 원본 크롭 좌표(scripts/crop-reaper.mjs REGIONS[0].w/h = 122/118)와 짝을 이루는

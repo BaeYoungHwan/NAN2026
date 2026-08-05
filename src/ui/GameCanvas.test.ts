@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  canvasDisplayScale,
   canvasRenderScale,
   deathFrameInfo,
   roundFadeAlpha,
@@ -152,45 +151,36 @@ describe("roundFadeAlpha", () => {
   });
 });
 
-describe("canvasDisplayScale", () => {
-  it("넉넉한 화면에서는 원본 크기(1)를 유지한다 — 확대하지 않는다", () => {
-    expect(canvasDisplayScale(1920, 1080)).toBe(1);
-    expect(canvasDisplayScale(3840, 2160)).toBe(1);
-  });
-
-  it("세로가 좁은 노트북 화면(1366x768)에서는 1보다 작게 줄인다", () => {
-    const scale = canvasDisplayScale(1366, 768);
-    expect(scale).toBeLessThan(1);
-    // 줄어든 캔버스 높이 + 페이지 헤더/푸터가 뷰포트 안에 들어와야 한다
-    expect(600 * scale + 210).toBeLessThanOrEqual(768);
-  });
-
-  it("가로와 세로 중 더 빡빡한 쪽을 따른다", () => {
-    // 가로만 좁은 경우 — 가로 기준이 선택된다
-    const narrow = canvasDisplayScale(600, 2000);
-    expect(narrow).toBeCloseTo((600 - 48) / 800);
-  });
-
-  it("화면이 아주 작아도 하한(0.5) 아래로는 줄이지 않는다", () => {
-    expect(canvasDisplayScale(200, 200)).toBe(0.5);
-  });
-});
-
 describe("canvasRenderScale", () => {
-  it("표준 해상도(dpr 1)에서는 표시 배율을 그대로 쓴다 — 기존 동작과 동일", () => {
-    expect(canvasRenderScale(1, 1)).toBe(1);
+  it("논리 크기 그대로 표시되고 dpr이 1이면 배율도 1 — 예전과 동일한 동작", () => {
+    expect(canvasRenderScale(800, 1)).toBe(1);
   });
 
   it("고DPI 화면에서는 백킹 스토어를 기기 픽셀비만큼 키운다", () => {
-    expect(canvasRenderScale(1, 1.5)).toBeCloseTo(1.5);
+    expect(canvasRenderScale(800, 1.5)).toBeCloseTo(1.5);
+    expect(canvasRenderScale(800, 2)).toBeCloseTo(2);
+  });
+
+  it("CSS로 축소된 만큼 배율도 함께 줄어든다 — 표시 폭에 비례한다", () => {
+    expect(canvasRenderScale(400, 1)).toBeCloseTo(0.5);
+    expect(canvasRenderScale(600, 1)).toBeCloseTo(0.75);
+  });
+
+  it("축소와 고DPI가 겹치면 곱해진다 — 작게 보여도 선명함은 유지된다", () => {
+    expect(canvasRenderScale(400, 2)).toBeCloseTo(1);
   });
 
   it("상한(2)을 넘지 않는다 — 3x 디스플레이에서도 픽셀 수가 폭발하지 않는다", () => {
-    expect(canvasRenderScale(1, 3)).toBe(2);
+    expect(canvasRenderScale(800, 3)).toBe(2);
+    expect(canvasRenderScale(1600, 2)).toBe(2);
   });
 
   it("devicePixelRatio가 비정상(0/음수)이면 1로 간주한다", () => {
-    expect(canvasRenderScale(1, 0)).toBe(1);
-    expect(canvasRenderScale(1, -2)).toBe(1);
+    expect(canvasRenderScale(800, 0)).toBe(1);
+    expect(canvasRenderScale(800, -2)).toBe(1);
+  });
+
+  it("표시 폭이 0이어도 하한 아래로 내려가지 않는다 — 레이아웃 전 방어값", () => {
+    expect(canvasRenderScale(0, 1)).toBe(0.25);
   });
 });

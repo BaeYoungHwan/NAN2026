@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Round } from "./core/round";
 import { BGM_FOR_ROUND } from "./audio/soundCues";
 import { useAudio } from "./audio/useAudio";
 import { debugRoundFromQuery } from "./core/debugRound";
 import { isTuningEnabled } from "./core/debugTuning";
+import { buildClearSummary } from "./content/clearSummary";
 import { ENDING_SLIDES, OPENING_SLIDES } from "./content/cutsceneSlides";
 import { DEATH_LINES, pickRandomLine, ROUND_ADVANCE_LINES, TUTORIAL_LINES } from "./content/reaperLines";
 import CutsceneSlide from "./ui/CutsceneSlide";
@@ -13,38 +14,16 @@ import HUD from "./ui/HUD";
 import MuteButton from "./ui/MuteButton";
 import RestartButton from "./ui/RestartButton";
 import TitleScreen, { GAME_TAGLINE, GAME_TITLE } from "./ui/TitleScreen";
-import TuningPanel from "./ui/TuningPanel";
-
-const DEATH_LINE_AUTO_DISMISS_MS = 1500;
-
-/** 경과 시간(ms)을 `m분 s초`로 — 엔딩 결과 요약용. */
-export function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}분 ${seconds}초` : `${seconds}초`;
-}
 
 /**
- * 엔딩 마지막에 붙일 결과 요약 슬라이드 텍스트를 만든다.
- *
- * 전체 클리어 연출이 캔버스에 "클리어!" 텍스트 한 줄뿐이던 것을 대체한다 —
- * 3라운드를 통과한 보상으로는 너무 빈약했다.
- *
- * `elapsedMs`가 null이면 시간 줄을 생략한다: `?round=2/3` 디버그 진입으로 들어오면
- * 튜토리얼 대사(계측 시작 지점)를 거치지 않아 잰 시간이 없다. 없는 값을 0초로
- * 보여주면 "0초 클리어"라는 거짓말이 된다.
+ * 개발 전용 튜닝 패널은 지연 로드한다 — 정적 import면 `isTuningEnabled()`가 런타임
+ * 분기라 트리셰이킹이 안 돼 패널 코드가 심사용 메인 번들에 그대로 실린다.
+ * 동적 import는 아래 `tuningEnabled` 분기 뒤에서만 실행되므로, 프로덕션에서는
+ * 청크를 내려받는 일 자체가 없다(청크 파일은 dist에 남는다 — tech-debt TD-005).
  */
-export function buildClearSummary(deathCount: number, elapsedMs: number | null): string {
-  return [
-    "— 결과 —",
-    `사망 횟수: ${deathCount}회`,
-    elapsedMs === null ? null : `클리어 시간: ${formatDuration(elapsedMs)}`,
-    deathCount === 0 ? "무사망 클리어. 그림자를 정말 잘 다루시네요." : "다시 도전하면 더 빨라질 겁니다.",
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-}
+const TuningPanel = lazy(() => import("./ui/TuningPanel"));
+
+const DEATH_LINE_AUTO_DISMISS_MS = 1500;
 
 function App() {
   const [deathCount, setDeathCount] = useState(0);
@@ -156,33 +135,39 @@ function App() {
         <p className="page__tagline">{GAME_TAGLINE}</p>
       </header>
 
-      <div className="stage-frame">
-        <div className="stage">
-          <GameCanvas
-            ref={gameCanvasRef}
-            onDeathCountChange={handleDeathCountChange}
-            onRoundChange={handleRoundChange}
-            inputDisabled={dialogueQueue.length > 0 || showTitle || showOpening || showEnding}
-            audioEngineRef={audioEngineRef}
-          />
-          <HUD round={round} deathCount={deathCount} />
-          <div className="overlay-buttons">
-            <MuteButton muted={muted} onToggle={toggleMute} />
-            <RestartButton onRestart={handleRestart} />
+      {/* .stage-area는 헤더·푸터를 뺀 남는 공간을 그대로 차지하는 **측정용** 영역이다.
+          시각적 테두리인 .stage-frame은 콘텐츠를 감싸므로(margin: auto) 폭이 .stage를
+          따라가는데, 그걸 재면 "프레임 폭 ← 스테이지 폭 ← 프레임 폭" 순환이 되어
+          창을 넓혀도 캔버스가 커지지 않는다(실측 확인). */}
+      <div className="stage-area">
+        <div className="stage-frame">
+          <div className="stage">
+            <GameCanvas
+              ref={gameCanvasRef}
+              onDeathCountChange={handleDeathCountChange}
+              onRoundChange={handleRoundChange}
+              inputDisabled={dialogueQueue.length > 0 || showTitle || showOpening || showEnding}
+              audioEngineRef={audioEngineRef}
+            />
+            <HUD round={round} deathCount={deathCount} />
+            <div className="overlay-buttons">
+              <MuteButton muted={muted} onToggle={toggleMute} />
+              <RestartButton onRestart={handleRestart} />
+            </div>
+            <DialogueBox
+              queue={dialogueQueue}
+              onAdvance={handleDialogueAdvance}
+              autoDismissMs={dialogueAutoDismissMs}
+              playSound={play}
+            />
+            {showTitle && <TitleScreen onStart={handleTitleStart} playSound={play} />}
+            {showOpening && <CutsceneSlide slides={OPENING_SLIDES} onFinish={handleOpeningFinish} playSound={play} />}
+            {/* 엔딩은 결과 요약에서 멈춰 있는다(holdAtEnd) — 넘길 다음 화면이 없어서,
+                사라지면 조작이 멈춘 게임 화면만 남는다. 다시 하려면 재시작 버튼을 쓴다. */}
+            {showEnding && (
+              <CutsceneSlide slides={endingSlides} onFinish={handleEndingFinish} holdAtEnd playSound={play} />
+            )}
           </div>
-          <DialogueBox
-            queue={dialogueQueue}
-            onAdvance={handleDialogueAdvance}
-            autoDismissMs={dialogueAutoDismissMs}
-            playSound={play}
-          />
-          {showTitle && <TitleScreen onStart={handleTitleStart} playSound={play} />}
-          {showOpening && <CutsceneSlide slides={OPENING_SLIDES} onFinish={handleOpeningFinish} playSound={play} />}
-          {/* 엔딩은 결과 요약에서 멈춰 있는다(holdAtEnd) — 넘길 다음 화면이 없어서,
-              사라지면 조작이 멈춘 게임 화면만 남는다. 다시 하려면 재시작 버튼을 쓴다. */}
-          {showEnding && (
-            <CutsceneSlide slides={endingSlides} onFinish={handleEndingFinish} holdAtEnd playSound={play} />
-          )}
         </div>
       </div>
 
@@ -193,8 +178,13 @@ function App() {
         NHN NAN2026 AI 게임 개발 해커톤 사전과제 — 키보드 전용
       </p>
 
-      {/* 개발 전용 — 스테이지 재생성이 필요한 값을 바꾸면 재시작으로 새 스테이지를 만든다. */}
-      {tuningEnabled && <TuningPanel round={round} deathCount={deathCount} onRegenerate={handleRestart} />}
+      {/* 개발 전용 — 스테이지 재생성이 필요한 값을 바꾸면 재시작으로 새 스테이지를 만든다.
+          지연 로드라 Suspense가 필요한데, 로딩 중 보여줄 것이 없으므로 fallback은 null이다. */}
+      {tuningEnabled && (
+        <Suspense fallback={null}>
+          <TuningPanel round={round} deathCount={deathCount} onRegenerate={handleRestart} />
+        </Suspense>
+      )}
     </div>
   );
 }
