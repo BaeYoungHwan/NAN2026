@@ -1,4 +1,4 @@
-import type { Point, TileGrid } from "./stage";
+import type { Point } from "./stage";
 
 export type Round = 1 | 2 | 3;
 
@@ -13,28 +13,6 @@ export function isGuideVisible(round: Round): boolean {
 }
 
 /**
- * 캐릭터 위치가 서 있는 셀의 진척도(스폰 기준 BFS 통로 거리)를 조회한다 —
- * "통로를 따라 얼마나 진행했는지"를 나타내는 지표. `distanceField`는
- * `procgen/reachability.ts`의 `bfsDistances`로 스폰 기준 미리 계산된 값이라
- * O(1) 조회만 한다.
- *
- * 이전에는 `stage.path`(carve 순서 점 목록) 중 유클리드 거리로 가장 가까운
- * 인덱스를 진척도로 썼는데(`nearestPathIndex`, 폐기됨), 벽을 전혀 모르는
- * 판정이라 절차적으로 생성된 통로가 자기 자신 근처를 지나가는 경우(흔함) 벽
- * 하나 너머의 먼 지점이 "가장 가깝다"고 오판해 체크포인트·골이 조기 통과
- * 처리될 수 있었다(실측 확인, ADR-003 "버그 수정 기록" 참고). `distanceField`는
- * 벽을 넘어갈 수 없는 그래프 거리라 이 문제가 구조적으로 재발할 수 없다.
- */
-export function progressAt(grid: TileGrid, distanceField: Int32Array, position: Point): number {
-  const col = Math.floor(position.x / grid.tileSize);
-  const row = Math.floor(position.y / grid.tileSize);
-  const value = distanceField[row * grid.cols + col];
-  // 캐릭터는 collider에 의해 항상 walkable 셀에만 있으므로 -1(미도달/벽)은
-  // 정상 경로에서는 나오지 않는다 — 방어적으로만 0 처리.
-  return value >= 0 ? value : 0;
-}
-
-/**
  * 한 라운드 스테이지의 골에 도달했을 때, 다음 라운드로 갈지 전체 클리어인지
  * 결정한다. 라운드 번호는 더 이상 진척도의 파생값이 아니라, 이 명시적 이벤트
  * (스테이지 골 도달)로만 전이되는 독립 상태다 — 라운드마다 독립 스테이지로
@@ -44,11 +22,6 @@ export function progressAt(grid: TileGrid, distanceField: Int32Array, position: 
 export function roundAfterClear(round: Round): { round: Round; cleared: boolean } {
   if (round >= MAX_ROUND) return { round, cleared: true };
   return { round: (round + 1) as Round, cleared: false };
-}
-
-/** 진척도가 골의 진척도(`Stage.goalProgress`)에 도달했는지 — 이 라운드 스테이지 클리어 판정. */
-export function isStageCleared(farthestProgress: number, goalProgress: number): boolean {
-  return farthestProgress >= goalProgress;
 }
 
 /**

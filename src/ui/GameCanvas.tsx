@@ -1,7 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
 import type { AudioEngine } from "../audio/audioEngine";
-import { dangerBeepSpec, justReturnedToSafety } from "../audio/dangerTone";
 import type { Point, Stage } from "../core/stage";
 import { useKeyboardInput } from "../core/input";
 import { debugRoundFromQuery } from "../core/debugRound";
@@ -10,8 +9,6 @@ import {
   effectiveAngleTolerance,
   hasTouchedCheckpoint,
   isGuideVisible,
-  isStageCleared,
-  progressAt,
   respawnPointFor,
   roundAfterClear,
   type Round,
@@ -223,13 +220,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   const deathCountRef = useRef(0);
   const roundRef = useRef<Round>(initialRound);
   const clearedRef = useRef(false);
-  // 이 라운드 스테이지 안에서 가장 멀리 도달한 진척도(스폰 기준 BFS 통로 거리,
-  // `progressAt`) — 단조증가, 사망해도 줄지 않는다. **골 도달(스테이지 클리어)
-  // 판정 전용**이다. 세이브 포인트 판정에는 쓰지 않는다 — 이 값은 방향 정보가
-  // 없는 스칼라라서, 체크포인트와 정반대 갈래로 가도 "통과"로 처리되는 버그가
-  // 있었다(`core/round.ts`의 `respawnPointFor` 주석 참고). 라운드가 전환되면
-  // (다음 스테이지로 교체) `loadStage`가 0으로 리셋한다.
-  const farthestProgressRef = useRef(0);
   // 이 스테이지의 세이브 포인트를 직접 밟아 활성화했는지 — `stage.checkpoints`와
   // 순서·길이가 같다. 한 번 true가 되면 그 스테이지가 끝날 때까지 유지되고(래치),
   // 사망 리스폰 지점(`respawnPointFor`)과 화면 표시가 모두 이 값만 본다.
@@ -246,10 +236,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   // 마지막 수평 이동 방향 — 스프라이트가 원본은 오른쪽을 보고 있으므로 왼쪽 이동 시 좌우 반전한다.
   const facingRightRef = useRef(true);
   // --- 오디오 타이밍 상태 (렌더에 영향을 주지 않으므로 전부 ref) ---
-  // 마지막 위험 경고음을 낸 시각(ms) — dangerBeepSpec이 준 간격만큼 지나야 다음 비프를 낸다.
-  const lastDangerBeepAtRef = useRef(0);
-  // 직전 프레임의 위험도 — 위험 구간에서 안전으로 빠져나온 순간을 잡아 안도음을 낸다.
-  const previousMarginRef = useRef(0);
   // 마지막으로 발소리를 낸 걷기 프레임 번호 — 걷기 애니메이션(WALK_FRAME_MS)과 발소리를
   // 같은 주기로 묶어 발이 땅에 닿는 타이밍에 소리가 나게 한다. 멈추면 -1로 리셋한다.
   const lastFootstepFrameRef = useRef(-1);
@@ -286,15 +272,11 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     stageRef.current = nextStage;
     characterRef.current = { ...nextStage.spawn };
     shadowAngleRef.current = naturalAngle(nextStage.lightSources, nextStage.spawn);
-    farthestProgressRef.current = 0;
     checkpointsReachedRef.current = nextStage.checkpoints.map(() => false);
     activeLightRef.current = nearestLight(nextStage.lightSources, nextStage.spawn);
     lightSwitchGraceRef.current = 0;
     dyingRef.current = false;
     facingRightRef.current = true;
-    // 위치가 통째로 바뀌면 위험도도 불연속으로 변한다 — 직전 값을 그대로 두면
-    // 새 스테이지 첫 프레임에 "위험에서 벗어났다"고 오판해 안도음이 울린다.
-    previousMarginRef.current = 0;
   }
 
   useImperativeHandle(
@@ -355,9 +337,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           // 보며 달리는 것처럼 보인다 — 리스폰 시 기본 방향(오른쪽)으로 되돌린다.
           facingRightRef.current = true;
           dyingRef.current = false;
-          // 죽던 순간의 위험도(1 초과)가 남아 있으면, 리스폰으로 정렬이 회복되는
-          // 이 프레임이 "위험에서 벗어난 순간"으로 잡혀 안도음이 리스폰음과 겹친다.
-          previousMarginRef.current = 0;
           audio?.play("respawn");
         }
       } else if (!clearedRef.current && !inputDisabled) {
@@ -416,17 +395,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           audio?.play("lightSwitch");
         }
 
-        // 진척도(스폰 기준 BFS 통로 거리, `progressAt`)를 갱신한다 — 골 도달
-        // 판정 전용이다. 벽을 고려한 그래프 거리라, 캐릭터가 있는 셀 자체의 진행
-        // 거리만 인정되고 벽 건너편의 공간적으로 가까운 지점으로는 튀지 않는다
-        // (이전 유클리드 최근접 방식의 문제 — ADR-003 "버그 수정 기록" 참고).
-        // farthestProgressRef는 단조증가라 사망 리스폰(위 dyingRef 분기)도
-        // 되돌아가지 않는다.
-        const currentProgress = progressAt(stage.grid, stage.distanceField, characterRef.current);
-        if (currentProgress > farthestProgressRef.current) {
-          farthestProgressRef.current = currentProgress;
-        }
-
         // 이번 프레임에 세이브 포인트를 새로 밟았는지 — 활성화(래치)와, 그 프레임의
         // 정렬 판정 스킵에 함께 쓴다. 스킵은 광원 전환 경계선과 체크포인트 근방이
         // 우연히 겹칠 때(ADR-004) 불공정한 사망을 막기 위한 용도다.
@@ -438,9 +406,15 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           justReachedSavePoint = true;
           audio?.play("checkpoint");
         });
-        // 이 라운드 스테이지의 골(goalProgress)에 도달했는지 — 도달하면
-        // 다음 라운드용 새 스테이지로 전환하거나(마지막 라운드면) 전체 클리어된다.
-        const justCleared = !clearedRef.current && isStageCleared(farthestProgressRef.current, stage.goalProgress);
+        // 이 라운드 스테이지의 골에 실제로 접촉했는지 — 도달하면 다음 라운드용
+        // 새 스테이지로 전환하거나(마지막 라운드면) 전체 클리어된다. 세이브
+        // 포인트와 동일하게 물리적 접촉(hasTouchedCheckpoint)으로 판정한다 —
+        // 이전에는 진척도(스폰 기준 BFS 거리, goalProgress) 스칼라 비교였는데,
+        // 통로 폭 2칸이 만드는 막다른 갈래가 골보다 더 먼 BFS 거리를 가질 수 있어
+        // 골 근처에도 못 가고 그 갈래에 들어서기만 해도 클리어로 오판됐다(실측
+        // 확인). 세이브 포인트가 같은 이유로 이미 이 방식으로 바뀐 전례가 있다
+        // (`core/round.ts`의 `respawnPointFor` 주석 참고).
+        const justCleared = !clearedRef.current && hasTouchedCheckpoint(characterRef.current, stage.goal);
 
         // 세이브 포인트 활성화/골 도달 판정을 정렬 판정보다 먼저 확인한다 — 그
         // 프레임에 정렬이 깨져도 "진행했다"는 사실은 항상 인정되어야 한다(스킵).
@@ -491,23 +465,12 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
       const natural = naturalAngle(stage.lightSources, characterRef.current);
       const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
-      // 게임플레이가 실제로 진행 중인 동안에만 위험 경고음을 낸다 — 사망 연출·클리어·
-      // 대사창 표시 중에는 그림자를 돌릴 수 없으므로 경고가 의미 없다.
+      // 게임플레이가 진행 중이 아니면(사망 연출·클리어·대사창 표시 중) 회전 루프음을 끈다 —
+      // 조작이 멈춘 상태에서 회전키를 누르고 있었다면 루프음이 그대로 남는다.
       const playing = !dyingRef.current && !clearedRef.current && !inputDisabled;
-      if (playing) {
-        const beep = dangerBeepSpec(margin);
-        // 위험할수록 간격이 좁아지고 음량이 커진다 — 2R부터 가이드라인(부채꼴)이
-        // 사라지므로 이 소리가 사실상 유일한 정밀 피드백이 된다.
-        if (beep.active && time - lastDangerBeepAtRef.current >= beep.intervalMs) {
-          lastDangerBeepAtRef.current = time;
-          audio?.play("dangerBeep", { volumeScale: beep.volume });
-        }
-        if (justReturnedToSafety(previousMarginRef.current, margin)) audio?.play("safeReturn");
-      } else {
-        // 조작이 멈춘 상태에서 회전키를 누르고 있었다면 루프음이 그대로 남는다.
+      if (!playing) {
         audio?.stopLoop("rotateLoop");
       }
-      previousMarginRef.current = margin;
 
       const deathInfo = dyingRef.current
         ? deathFrameInfo(time - deathAnimStartRef.current, DEATH_ANIM_MS, time)

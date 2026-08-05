@@ -135,11 +135,11 @@ describe("AudioEngine 효과음 재생", () => {
     expect(sources).toHaveLength(2);
   });
 
-  it("volumeScale이 큐 기본 음량에 곱해진다 — 위험도에 따라 경고음 세기가 달라진다", () => {
+  it("volumeScale이 큐 기본 음량에 곱해진다", () => {
     const { context, gains } = fakeContext();
     const engine = new AudioEngine({ context: context as unknown as AudioContext, buffers: allBuffers(), now });
 
-    engine.play("dangerBeep", { volumeScale: 0.5 }); // 기본 0.5
+    engine.play("lightSwitch", { volumeScale: 0.5 }); // 기본 0.5
 
     // 앞의 3개는 master/sfxBus/bgmBus, 그 다음이 이번 재생의 cueGain이다.
     const cueGain = gains[gains.length - 1];
