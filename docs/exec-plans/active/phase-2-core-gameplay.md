@@ -50,7 +50,7 @@
   - [x] **버그 발견 및 수정**: `drawShadowSprite`(`src/ui/GameCanvas.tsx`)의 전단(shear) 전용 변환이 `shadowAngle`이 정확히 수평(0° 또는 180°, sinθ≈0)일 때 완전히 퇴화(degenerate)되어 그림자 실루엣이 화면에 전혀 렌더링되지 않던 문제. `ctx.transform(1, 0, -stretch·cosθ, -stretch·sinθ, 0, 0)`에서 x축·y축 기저벡터가 둘 다 수평이 되어 2D 이미지가 폭 0으로 찌그러짐. 캔버스 픽셀 캡처로 재현 확인(각도 0°→비가시, 90°→정상 렌더링) 후 `shadowVerticalComponent()` 헬퍼로 sinθ에 최소 크기(0.12)를 강제하는 방식으로 수정 — 각도가 아주 살짝 어긋나 보이는 대가로 그림자가 항상 화면에 보이게 함. 회귀 테스트 4건 추가(`GameCanvas.test.ts`), 전체 98개 테스트 통과, 브라우저 실측으로 수정 확인. 같은 브랜치(`feature/round-independent-stages`)에 추가 커밋으로 반영(PR #11에 포함)
   - [x] **버그 발견 및 수정 (PR #11 리뷰 중)**: 진척도 판정(`nearestPathIndex`)이 캐릭터 위치에서 `stage.path` 중 유클리드 거리로 가장 가까운 인덱스를 찾는 방식이라 벽을 전혀 몰랐음. `carveCorridor`가 좁은 그리드 안에서 통로가 자기 자신 근처를 지나가는 경우가 흔해(300시드 전수 실측), 벽 하나 너머의 먼 인덱스(체크포인트·골 근처)가 "가장 가깝다"고 오판되는 사례가 실제 프로덕션 시드(`DEFAULT_SEED=12345` 1R 포함)에서 확인됨 — 체크포인트/골 조기 통과 가능한 정확성 버그. 스폰 기준 BFS 그래프 거리 필드(`Stage.distanceField`, `bfsDistances`)로 교체해 벽을 넘는 판정이 구조적으로 불가능하도록 수정(`progressAt`/`respawnPointFor`가 `nearestPathIndex`/`respawnIndexFor` 대체). 부수적으로 체크포인트 진행도 오름차순 재시도 게이트(`isAscendingProgress`) 추가, 재시도 예산 30→200회로 조정. 회귀 테스트 다수 추가(합성 그리드 벽 우회 검증, 200시드 sweep), `npm test`(107개) 전부 통과, `tsc`/`build` 클린. 상세 기록: `docs/design-docs/adr/ADR-003-procgen-corridor-collision.md` "버그 수정 기록 (2026-07-28)". 같은 브랜치에 추가 커밋으로 반영(PR #11에 포함)
   - [x] **버그 발견 및 수정 (2026-08-04, 플레이 제보)**: "찍지도 않은 세이브 포인트가 활성 표시되고, 죽으면 처음 보는 지점에서 재개된다" — 세이브 포인트 활성화 판정이 `farthestProgress >= checkpointProgress[i]`, 즉 방향 정보가 없는 스칼라(스폰 기준 BFS 거리) 비교라, 체크포인트와 정반대 갈래로 진행해도 통과 처리되던 문제. 체크포인트 반경 2칸을 통행 금지로 막고 BFS를 돌린 실측에서 전 라운드 6/6 체크포인트가 "근처에 얼씬도 않고" 통과 가능함을 확인. 2차 증상으로 배치(carve 순서 인덱스 균등 분할)와 판정(BFS 거리)의 척도가 달라 체크포인트가 코스 초반에 몰려 있었음(골 진행도 22인 1R에서 체크포인트 진행도 3, 5). 수정: ① 활성화 판정을 실제 접촉(`hasTouchedCheckpoint`, 반경 40px = 통로 폭의 절반)으로 교체 + 프레임 래치, ② 배치 기준을 "스폰→골 최단 경로 위 + BFS 진행도 균등 분할"로 교체 — 최단 경로 제한은 세이브 포인트를 골로 가는 길목에 놓기 위한 것(이전 배치는 2R·3R 체크포인트가 최단 경로 밖, 2R은 맵 구석에 있어 일부러 찾아가야 했음), 진행도 분할은 코스 중간에 놓기 위한 것(1~200 시드 실측 전부 정확히 50% 지점). 실측상 밟는 데 드는 추가 이동이 중앙값 -5px·최대 30px로 사실상 공짜이면서 우회도 100/100 시드 가능, ③ 개수 2→1(라운드당 코스 중간 1개). 세이브 포인트를 밟을지는 플레이어 선택이며 하나도 안 밟고 클리어 가능한 것이 의도된 사양임을 확인(캐릭터 충돌 반경 반영 픽셀 단위 우회 탐색으로 1~30 시드 전부 우회 가능 실측). 회귀 테스트 추가(접촉 판정 경계값, 배치 진행도 비율 30~70% 게이트), `npm test`(113개) 전부 통과, `tsc -b` 클린. 상세 기록: `docs/design-docs/adr/ADR-003-procgen-corridor-collision.md` "버그 수정 기록 (2026-08-04)"
-- [x] 오늘 결정사항(Jump King 튜닝, 라운드=독립 스테이지, AI 제거) 배경·근거를 AI활용기술문서용으로 기록 — `docs/product-specs/ai-usage-report.md` 초안 작성 완료 (§C 참고)
+- [x] 오늘 결정사항(Jump King 튜닝, 라운드=독립 스테이지, AI 제거) 배경·근거를 AI활용기술문서용으로 기록 — `docs/submission/ai-usage-report.md` 초안 작성 완료 (§C 참고, 작성 당시 경로는 `docs/product-specs/`였으나 이후 제출물 문서 통합으로 `docs/submission/`으로 이동)
 
 ### E. 오디오 시스템 (2026-08-04, 구현 완료)
 
@@ -85,9 +85,10 @@
   - [ ] (신규 발견) HUD 상단 안내 문구가 우측 상단 "재시작" 버튼에 가려짐 — 심사자가 처음 보는 화면이므로 레이아웃 조정 필요
   - [ ] (신규 발견) `favicon.ico` 미제공 — 404 2건. 기능 무관하나 배포본 정리 차원에서 추가 권장
 - [ ] 플레이 영상 (유튜브 공개 업로드 + 링크만 제출 — [[project-submission-video-hosting]])
-- [ ] 게임소개 PDF — `docs/product-specs/game-intro.md` 초안 작성됨. 남은 작업: 플레이 영상 링크, 스크린샷(맵 확정 후), PDF 변환
-- [ ] AI활용기술문서 PDF — `docs/product-specs/ai-usage-report.md` 초안 작성됨(배영환 파트). 남은 작업: 원호님 파트(콘텐츠/QA AI 활용) 보강, 스크린샷 첨부, PDF 변환
-- [ ] 팀원 롤 기술서 PDF — `docs/product-specs/team-roles.md` 초안 작성됨(배영환 파트 완료, 송원호 파트는 커밋 로그 기반 초안만 — 본인 작성 필요)
+- [ ] 게임소개 PDF — `docs/submission/game-intro.md` 초안 작성됨. 남은 작업: 플레이 영상 링크, 스크린샷(맵 확정 후), PDF 변환
+- [ ] AI활용기술문서 PDF — `docs/submission/ai-usage-report.md` 양쪽 파트 작성 완료(PR #22). 남은 작업: 스크린샷 첨부, 라이선스 확인, PDF 변환
+- [ ] 팀원 롤 기술서 PDF — `docs/submission/team-roles.md` 양쪽 파트 작성 완료. 남은 작업: 팀 검토, PDF 변환 (`docs/product-specs/team-roles.md`는 원호 파트 미작성 상태였던 중복 초안이라 삭제함)
+- [x] 제출물 문서 3종을 `docs/product-specs/`에서 `docs/submission/`으로 통합 이동 (PR #23 리뷰 반영, 2026-08-05) — 기획/작업용 문서(PRD 등)와 제출용 최종본을 디렉터리로 분리. `CLAUDE.md` 프로젝트 구조 트리에도 반영
 
 ## 검증 기준
 

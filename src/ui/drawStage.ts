@@ -1,4 +1,4 @@
-import type { Point, Stage } from "../core/stage";
+import type { Stage } from "../core/stage";
 import { ROUND_BACKGROUND_BRIGHTNESS, type Round } from "../core/round";
 
 /**
@@ -104,56 +104,6 @@ let floorGrainLayer: HTMLCanvasElement | null = null;
 function grainHash(n: number): number {
   const v = Math.sin(n * 12.9898) * 43758.5453;
   return v - Math.floor(v);
-}
-
-/**
- * 광원 발치의 얕은 웅덩이 — 재질 디테일(판석·접지 그림자)만으로는 여전히
- * 밋밋하다는 지적이라, 재질이 아니라 조명과 상호작용하는 요소를 하나 더한다.
- * `drawStage`가 아니라 GameCanvas의 광원 루프에서, 그 램프의 빛 웅덩이
- * 그라디언트를 그린 "직후"에 호출해야 한다 — `drawStage` 안에서 그렸더니
- * GameCanvas가 이후에 훨씬 강한 빛 웅덩이를 그 위에 덧그려서 완전히 덮여
- * 안 보였다(실측 확인). 광원마다 절반 정도만(성기게) 나타나게 해 모든 램프
- * 발치가 똑같이 반복되는 패턴으로 안 보이게 한다.
- */
-export function drawPuddleReflection(ctx: CanvasRenderingContext2D, light: Point, index: number, glowRgb: string): void {
-  const seed = light.x * 7.13 + light.y * 3.71 + index * 19.1;
-  if (grainHash(seed) < 0.45) return;
-
-  const px = light.x + (grainHash(seed + 1) - 0.5) * 26;
-  const py = light.y + 16 + grainHash(seed + 2) * 8;
-  const rw = 11 + grainHash(seed + 3) * 7;
-  const rh = rw * 0.4;
-
-  // 웅덩이 자체(젖은 바닥)를 램프 색과 같은 색조의 반투명 웜(wash)만으로
-  // 표현하면 이미 그 자리를 덮고 있는 빛 웅덩이 그라디언트와 색조가 거의
-  // 같아서 눈에 안 띈다(실측 확인) — 어두운 테두리로 웅덩이의 "모양" 자체를
-  // 분리해서 보여준 다음, 램프 색과 대비되는 밝은 흰빛 하이라이트(반사광
-  // 특유의 반짝임)로 시선을 끈다.
-  ctx.strokeStyle = "rgba(10, 9, 7, 0.4)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.ellipse(px, py, rw, rh, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = "rgba(15, 13, 10, 0.22)";
-  ctx.fill();
-
-  const wash = ctx.createRadialGradient(px, py, 0, px, py, rw * 0.85);
-  wash.addColorStop(0, `rgba(${glowRgb}, 0.22)`);
-  wash.addColorStop(1, `rgba(${glowRgb}, 0)`);
-  ctx.fillStyle = wash;
-  ctx.beginPath();
-  ctx.ellipse(px, py, rw * 0.85, rh * 0.85, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const hx = px + (grainHash(seed + 4) - 0.5) * rw * 0.5;
-  const hy = py - rh * 0.25;
-  const highlight = ctx.createRadialGradient(hx, hy, 0, hx, hy, rw * 0.4);
-  highlight.addColorStop(0, "rgba(255, 246, 220, 0.65)");
-  highlight.addColorStop(1, "rgba(255, 246, 220, 0)");
-  ctx.fillStyle = highlight;
-  ctx.beginPath();
-  ctx.ellipse(hx, hy, rw * 0.4, rh * 0.4, 0, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 /**
@@ -573,11 +523,6 @@ export function drawStage(
     }
     ctx.drawImage(floorGrainLayer, 0, 0);
   }
-
-  // 웅덩이(젖은 바닥 반사)는 여기서 그리지 않는다 — GameCanvas.tsx의 광원 루프가
-  // 이 함수 이후에 훨씬 강한 빛 웅덩이 그라디언트를 그 위에 덧그려서, 여기서
-  // 넣은 반사는 완전히 덮여 안 보였다(실측). 램프별 빛 웅덩이 바로 다음
-  // 단계에서 그리도록 그쪽으로 옮겼다 — drawPuddleReflection 참고.
 
   // 벽 채우기(타일 패턴 또는 폴백 단색)+AO+베벨은 stage가 바뀌기 전까지 절대
   // 안 변하는 정적 레이어라 buildWallLayer()가 오프스크린 캔버스에 미리 그려둔
