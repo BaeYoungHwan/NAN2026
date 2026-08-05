@@ -18,7 +18,11 @@ const PREVIEW_PATH = "scripts/preview-reaper.png";
 
 // { name, x, y, w, h } — 좌표는 반복 미리보기(ruler 오버레이)로 실측했다.
 // "표정/반응 예시" 그리드(시트 우상단 박스) 1행 1열 "평상시(눈치)" 칸.
-const REGIONS = [{ name: "reaper-portrait-neutral", x: 1021, y: 50, w: 122, h: 118 }];
+// x=1021에서 시작했더니 왼쪽 끝 1~2px에 옆 패널 경계선(회색 얇은 선)이 걸려
+// 배경색(크림)과 달라 플러드필로 안 지워지고 그대로 남았다 — 실제 게임에서
+// "캐릭터에 세로줄이 있다"는 결함으로 보임(PR #23 리뷰). x를 9px 더 오른쪽으로
+// 옮겨 경계선을 완전히 피한다(실측 재확인 — exact-crop-ruler2.png 참고).
+const REGIONS = [{ name: "reaper-portrait-neutral", x: 1030, y: 50, w: 122, h: 118 }];
 
 async function preview() {
   const image = sharp(SHEET_PATH);

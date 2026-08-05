@@ -57,7 +57,6 @@ function DialogueBox({ queue, onAdvance, autoDismissMs, playSound }: DialogueBox
 
   return (
     <div style={overlayStyle}>
-      <img src={PORTRAIT_SRC} alt="" style={portraitStyle} />
       <div
         style={boxStyle}
         onClick={() => {
@@ -69,6 +68,7 @@ function DialogueBox({ queue, onAdvance, autoDismissMs, playSound }: DialogueBox
         <p style={lineStyle}>{currentLine}</p>
         {autoDismissMs === undefined && <p style={hintStyle}>클릭 또는 Enter/Space로 계속</p>}
       </div>
+      <img src={PORTRAIT_SRC} alt="" style={portraitStyle} />
     </div>
   );
 }
@@ -80,28 +80,30 @@ const overlayStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
   display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "flex-end",
+  flexDirection: "row",
+  alignItems: "flex-end",
+  justifyContent: "center",
+  gap: 12,
   paddingBottom: 32,
   pointerEvents: "none",
 };
 
-// 대화 박스 바로 위, 박스 바깥에 크게 띄우는 저승사자 초상 — 시트의 "표정/반응 예시"
+// 대화 박스 오른쪽, 박스 바깥에 띄우는 저승사자 초상 — 시트의 "표정/반응 예시"
 // 그리드 중 기본(평상시) 표정 칸을 크롭한 것(scripts/crop-reaper.mjs). 박스 자체는
-// 계속 세로로 좁게 유지하고(가독성 우선 레이아웃 그대로), 초상만 그 위에 겹치지 않게
-// 별도 요소로 쌓아 "박스 밖에서 말을 거는" 느낌을 준다.
+// 계속 좁게 유지하고(가독성 우선 레이아웃 그대로), 초상만 옆에 겹치지 않게 별도
+// 요소로 나란히 놓아 "박스 밖에서 말을 거는" 느낌을 준다. 원본 크롭이 122×118이라
+// aspectRatio로 비율을 유지한 채 폭만 키운다(원본보다 커지지만, 삽화 스타일이라
+// 이 정도 확대는 흐려 보이지 않는다).
 const portraitStyle: CSSProperties = {
-  width: 96,
-  height: 96,
+  width: 140,
+  aspectRatio: "122 / 118",
   objectFit: "contain",
-  marginBottom: 8,
   filter: "drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))",
 };
 
 const boxStyle: CSSProperties = {
-  width: "80%",
-  maxWidth: 480,
+  width: "60%",
+  maxWidth: 380,
   background: "rgba(20, 20, 20, 0.92)",
   border: "1px solid #666",
   borderRadius: 8,
