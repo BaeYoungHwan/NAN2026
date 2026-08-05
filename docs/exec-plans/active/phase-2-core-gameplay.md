@@ -65,8 +65,8 @@
 - [ ] 플레이 가능 빌드 (GitHub Pages — 배포 완료, PRD 미결 사항 확정 후 최종 밸런스 반영 필요)
 - [ ] 플레이 영상 (유튜브 공개 업로드 + 링크만 제출 — [[project-submission-video-hosting]])
 - [ ] 게임소개 PDF — `docs/product-specs/game-intro.md` 초안 작성됨. 남은 작업: 플레이 영상 링크, 스크린샷(맵 확정 후), PDF 변환
-- [ ] AI활용기술문서 PDF — `docs/product-specs/ai-usage-report.md` 초안 작성됨(배영환 파트). 남은 작업: 원호님 파트(콘텐츠/QA AI 활용) 보강, 스크린샷 첨부, PDF 변환
-- [ ] 팀원 롤 기술서 PDF — `docs/product-specs/team-roles.md` 초안 작성됨(배영환 파트 완료, 송원호 파트는 커밋 로그 기반 초안만 — 본인 작성 필요)
+- [ ] AI활용기술문서 PDF — `docs/product-specs/ai-usage-report.md` 양쪽 파트 작성 완료(PR #22). 남은 작업: 스크린샷 첨부, 라이선스 확인, PDF 변환
+- [ ] 팀원 롤 기술서 PDF — `docs/submission/team-roles.md` 양쪽 파트 작성 완료. 남은 작업: 팀 검토, PDF 변환 (`docs/product-specs/team-roles.md`는 원호 파트 미작성 상태였던 중복 초안이라 삭제함)
 
 ## 검증 기준
 

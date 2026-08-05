@@ -15,8 +15,8 @@ NHN 주최 **NAN2026 AI 게임 개발 해커톤** 사전과제 제출용 웹 게
 | 1 | 플레이 가능한 빌드 및 소스 코드 | 웹(GitHub Pages) + 소스 | ✅ 완료 | https://baeyounghwan.github.io/NAN2026/ |
 | 2 | 플레이 동영상 (30~60초) | YouTube | ⏳ 미착수 | - |
 | 3 | 게임 소개 및 설명 문서 | PDF | ⏳ 미착수 | - |
-| 4 | AI 활용 기술 문서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/ai-usage-report.md`](docs/product-specs/ai-usage-report.md) |
-| 5 | 팀원 롤 기술서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/team-roles.md`](docs/product-specs/team-roles.md) |
+| 4 | AI 활용 기술 문서 | PDF | 🟡 초안(양쪽 파트 완료, 스크린샷·라이선스 확인·PDF 변환 대기) | [`docs/product-specs/ai-usage-report.md`](docs/product-specs/ai-usage-report.md) |
+| 5 | 팀원 롤 기술서 | PDF | 🟡 초안(양쪽 파트 완료, 팀 검토·PDF 변환 대기) | [`docs/submission/team-roles.md`](docs/submission/team-roles.md) |
 
 플레이 가능 빌드는 배포돼 있지만, PRD 미결 사항(그림자 길이·통로 폭 등, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)이 확정되고 맵 디자인이 반영된 뒤 최종 밸런스로 갱신될 예정입니다.
 
