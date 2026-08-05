@@ -17,14 +17,11 @@ import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/ch
 import { createGridCollider } from "../physics/collider";
 import { naturalAngle, nearestLight } from "../shadow/shadowCaster";
 import { alignmentMargin } from "../shadow/containmentJudge";
+import { getTuning } from "../core/tuning";
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   DEFAULT_SEED,
-  LIGHT_SWITCH_GRACE_SECONDS,
-  ROTATION_SPEED,
-  SAFE_ANGLE_TOLERANCE,
-  SHADOW_LENGTH,
   generateStage,
   seedForRound,
 } from "../procgen/stageGenerator";
@@ -42,7 +39,14 @@ import {
   type ShadowExpression,
 } from "./characterSprites";
 
-const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
+/**
+ * 1R 안전 구역 가이드(부채꼴)의 반지름 — 그림자 길이보다 조금 크게 그려 그림자
+ * 끝이 부채꼴 안에 들어오게 한다. 그림자 길이가 튜닝 대상이라 상수가 아니라
+ * 함수다(모듈 로드 시점에 계산해 두면 튜닝 패널로 길이를 바꿔도 부채꼴만 옛 크기로 남는다).
+ */
+function safeZoneRadius(): number {
+  return getTuning().shadowLength + 20;
+}
 // 광원(가로등) 불빛 색 — hex 하나로만 두고 rgb 문자열(그라디언트용)은
 // hexToRgbString으로 파생시킨다. 예전엔 이 색을 hex/rgb 리터럴로 여러 곳에
 // (빛 웅덩이, 광선, 랜턴 몸통, 그림자, 웅덩이 반사) 따로 박아넣어 하나만
@@ -50,8 +54,64 @@ const SAFE_ZONE_RADIUS = SHADOW_LENGTH + 20;
 const LANTERN_COLOR_ACTIVE = "#f5d547";
 const LANTERN_COLOR_INACTIVE = "#8a7a3a";
 const DEATH_ANIM_MS = 1600; // 사망 시 4단계 애니메이션을 보여주는 동안 멈추는 시간
+/**
+ * 라운드 전환 시 검은 화면에서 밝아지는 시간(ms).
+ *
+ * 라운드가 올라가면 완전히 다른 지형의 스테이지가 같은 프레임에 갈아끼워져
+ * (`loadStage`) 화면이 툭 튄다. 스테이지 교체 자체를 지연시키면 골 접촉·정렬
+ * 판정 순서까지 건드려야 하므로, 교체는 지금처럼 즉시 하고 **교체 직후 한 번
+ * 검게 덮었다가 걷어내는** 방식으로 이음매를 가린다. 이 동안에는 App이
+ * 라운드 승급 대사를 띄우고 있어(`inputDisabled`) 조작도 어차피 멈춰 있다.
+ */
+const ROUND_FADE_MS = 550;
 const BODY_DISPLAY_HEIGHT = 42; // 충돌 판정(CHARACTER_RADIUS)과 무관한 순수 표시 크기
 const CAMERA_ZOOM = 2.2; // 캐릭터를 따라다니며 확대하는 배율 — 맵 전체 대신 주변만 크게 보여준다
+
+/**
+ * 캔버스 백킹 스토어 배율 상한. 3x 디스플레이에서 800×600을 그대로 곱하면
+ * 2400×1800이 되는데, 매 프레임 `ctx.filter = blur()`/`shadowBlur`를 여러 번 쓰는
+ * 렌더 경로(그림자 실루엣·먼지·촛불)에서는 그 픽셀 수가 곧바로 프레임 타임이 된다.
+ * 2배면 육안상 충분히 선명하다.
+ */
+const MAX_RENDER_SCALE = 2;
+/**
+ * 캔버스 바깥 페이지 요소(제목 헤더·조작 안내 푸터·프레임 여백)가 차지하는 대략적인
+ * 크기(px) — `src/index.css`의 `.page` 레이아웃 기준 실측값이다. 정확할 필요는 없고,
+ * 1366×768 같은 작은 노트북 화면에서 캔버스가 잘리지 않을 만큼만 넉넉하면 된다.
+ */
+const PAGE_CHROME_WIDTH = 48;
+// 1366×768(브라우저 크롬 제외 실측 innerHeight 730)에서 페이지 전체 높이가 캔버스
+// 높이 + 211px로 측정됐다 — 스크롤이 생기지 않도록 약간의 여유를 더한 값.
+const PAGE_CHROME_HEIGHT = 216;
+/** 표시 배율 하한 — 화면이 아주 작아도 이 아래로는 줄이지 않는다(그 경우 페이지가 스크롤된다). */
+const MIN_DISPLAY_SCALE = 0.5;
+
+/**
+ * 뷰포트 크기에 맞춘 캔버스 **표시** 배율(CSS 픽셀 기준, 1 = 800×600 그대로).
+ *
+ * 캔버스는 지금까지 800×600으로 못박혀 있어, 세로 768px짜리 노트북에서는 제목·푸터와
+ * 합쳐 화면을 넘겼다. 논리 좌표계(800×600)는 그대로 두고 표시 크기만 줄이므로
+ * 게임 로직·카메라 클램프·오프스크린 캐시에는 아무 영향이 없다.
+ *
+ * 확대는 하지 않는다(상한 1) — 원본보다 키우면 스프라이트가 뭉개진다.
+ */
+export function canvasDisplayScale(viewportWidth: number, viewportHeight: number): number {
+  const byWidth = (viewportWidth - PAGE_CHROME_WIDTH) / CANVAS_WIDTH;
+  const byHeight = (viewportHeight - PAGE_CHROME_HEIGHT) / CANVAS_HEIGHT;
+  return clamp(Math.min(byWidth, byHeight), MIN_DISPLAY_SCALE, 1);
+}
+
+/**
+ * 실제로 그릴 백킹 스토어 배율 — 표시 배율 × 기기 픽셀비, 상한 적용.
+ *
+ * 이 값이 1이 아니면 `renderFrame`이 기준 변환으로 깔아둔다. 지금까지는 backing
+ * store가 항상 800×600이라 devicePixelRatio가 1이 아닌 환경(Windows 125~150% 배율,
+ * 레티나)에서 브라우저가 그대로 확대해 전체 화면이 흐릿했다.
+ */
+export function canvasRenderScale(displayScale: number, devicePixelRatio: number): number {
+  const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return clamp(displayScale * ratio, MIN_DISPLAY_SCALE, MAX_RENDER_SCALE);
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -101,6 +161,20 @@ export interface DeathFrameInfo {
   fallRotation: number; // ①구간 중 death1 프레임에만 적용하는 쓰러짐 회전각(라디안)
   soulBob: number; // ②③구간(그림자가 몸을 빠져나가는 동안) 위아래로 떠다니는 오프셋(px)
   vignette: number; // 사망이 진행될수록 짙어지는 화면 어두움 정도(0~1)
+}
+
+/**
+ * 라운드 전환 페이드의 현재 불투명도(0~1)를 구한다 — 1(완전히 검음)에서 시작해
+ * `ROUND_FADE_MS` 동안 선형으로 0까지 걷힌다.
+ *
+ * `startedAt`이 null이면(페이드 중이 아님) 0. 전환 직후 첫 프레임은 `now`와
+ * `startedAt`이 같아 정확히 1이 되고, 시간이 지나면 0에서 멈춘다(음수로 내려가지
+ * 않는다). rAF timestamp가 뒤로 가는 경우는 없지만, 방어적으로 clamp한다.
+ */
+export function roundFadeAlpha(startedAt: number | null, now: number): number {
+  if (startedAt === null) return 0;
+  const progress = (now - startedAt) / ROUND_FADE_MS;
+  return clamp(1 - progress, 0, 1);
 }
 
 /** 사망 시퀀스 경과 시간(ms)으로 죽음 모션의 현재/다음 프레임과 크로스페이드 비율을 계산한다. */
@@ -234,6 +308,11 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
   // 사망 시퀀스 진행 상태 — true인 동안 게임플레이가 멈추고 죽음 모션이 재생된다.
   const dyingRef = useRef(false);
   const deathAnimStartRef = useRef(0);
+  // 라운드 전환 페이드가 시작된 시각(rAF timestamp). null이면 페이드 중이 아니다 — ROUND_FADE_MS 참고.
+  const roundFadeStartRef = useRef<number | null>(null);
+  // 현재 백킹 스토어 배율 — 리사이즈 효과가 갱신하고 렌더 루프가 매 프레임 읽는다.
+  // state가 아니라 ref인 이유는, 창 크기를 바꿀 때마다 rAF 루프가 취소·재생성되는 걸 막기 위함이다.
+  const renderScaleRef = useRef(1);
   // 마지막 수평 이동 방향 — 스프라이트가 원본은 오른쪽을 보고 있으므로 왼쪽 이동 시 좌우 반전한다.
   const facingRightRef = useRef(true);
   // --- 오디오 타이밍 상태 (렌더에 영향을 주지 않으므로 전부 ref) ---
@@ -280,6 +359,33 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     };
   }, []);
 
+  /**
+   * 캔버스의 표시 크기(CSS)와 백킹 스토어 크기(픽셀)를 뷰포트·기기 픽셀비에 맞춘다.
+   *
+   * 렌더 루프와 분리된 별도 효과다 — 창 크기를 바꿔도 rAF 루프는 그대로 두고
+   * 캔버스 엘리먼트와 `renderScaleRef`만 갱신한다. `canvas.width` 대입은 컨텍스트
+   * 상태를 초기화하지만, `renderFrame`이 매 프레임 첫 줄에서 변환을 다시 세팅하므로
+   * 다음 프레임에 정상 복구된다.
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const applyScale = () => {
+      const displayScale = canvasDisplayScale(window.innerWidth, window.innerHeight);
+      const renderScale = canvasRenderScale(displayScale, window.devicePixelRatio);
+      renderScaleRef.current = renderScale;
+      canvas.width = Math.round(CANVAS_WIDTH * renderScale);
+      canvas.height = Math.round(CANVAS_HEIGHT * renderScale);
+      canvas.style.width = `${Math.round(CANVAS_WIDTH * displayScale)}px`;
+      canvas.style.height = `${Math.round(CANVAS_HEIGHT * displayScale)}px`;
+    };
+
+    applyScale();
+    window.addEventListener("resize", applyScale);
+    return () => window.removeEventListener("resize", applyScale);
+  }, []);
+
   // 새 스테이지를 로드할 때 재설정해야 하는 상태를 한곳에 모은다 — 수동 재시작(1R부터)과
   // 라운드 전환(다음 라운드 스테이지로) 양쪽이 공유한다.
   function loadStage(nextStage: Stage) {
@@ -291,6 +397,9 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
     lightSwitchGraceRef.current = 0;
     dyingRef.current = false;
     facingRightRef.current = true;
+    // 진행 중이던 라운드 전환 페이드는 여기서 리셋한다 — 라운드 전환 경로는 이
+    // 호출 직후 다시 페이드를 걸고, 수동 재시작 경로는 페이드 없이 바로 보인다.
+    roundFadeStartRef.current = null;
   }
 
   useImperativeHandle(
@@ -384,10 +493,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         }
 
         if (inputRef.current.rotateCW) {
-          shadowAngleRef.current += ROTATION_SPEED * deltaSeconds;
+          shadowAngleRef.current += getTuning().rotationSpeed * deltaSeconds;
         }
         if (inputRef.current.rotateCCW) {
-          shadowAngleRef.current -= ROTATION_SPEED * deltaSeconds;
+          shadowAngleRef.current -= getTuning().rotationSpeed * deltaSeconds;
         }
         // 회전하는 동안만 이어지는 루프음. 엔진이 중복 호출을 무시하므로 매 프레임 불러도 된다.
         if (inputRef.current.rotateCW || inputRef.current.rotateCCW) {
@@ -402,7 +511,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         // (ADR-004). 유예 동안은 정렬이 깨져도 죽지 않는다.
         const currentActiveLight = nearestLight(stage.lightSources, characterRef.current);
         if (currentActiveLight.x !== activeLightRef.current.x || currentActiveLight.y !== activeLightRef.current.y) {
-          lightSwitchGraceRef.current = LIGHT_SWITCH_GRACE_SECONDS;
+          lightSwitchGraceRef.current = getTuning().lightSwitchGraceSeconds;
           activeLightRef.current = currentActiveLight;
           // 요구 각도가 방금 크게 바뀌었고 잠시 무적이라는 것을 알린다 — 이 소리가
           // 없으면 플레이어는 왜 갑자기 그림자를 크게 돌려야 하는지 알 수 없다.
@@ -448,13 +557,16 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
               loadStage(nextStage);
               stage = nextStage; // ★ 이번 프레임 렌더가 새 스테이지를 참조하도록 재할당(위 let 참고)
               roundRef.current = nextRound;
+              // 새 지형이 이번 프레임부터 곧장 보이므로, 여기서 페이드를 걸어
+              // 검은 화면에서 밝아지게 한다(ROUND_FADE_MS 참고).
+              roundFadeStartRef.current = time;
               audio?.play("roundUp");
               onRoundChange?.(nextRound, false);
             }
           }
           // justReachedSavePoint만 true인 경우는 라운드 변화 없이 이번 프레임 정렬 판정만 스킵한다.
         } else {
-          const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
+          const tolerance = effectiveAngleTolerance(roundRef.current, getTuning().safeAngleTolerance);
           const natural = naturalAngle(stage.lightSources, characterRef.current);
           const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
 
@@ -476,7 +588,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       }
 
       // 렌더용 위험도/포즈 — 사망 리셋 등으로 위치가 막 바뀌었을 수 있어 매 프레임 다시 계산한다.
-      const tolerance = effectiveAngleTolerance(roundRef.current, SAFE_ANGLE_TOLERANCE);
+      const tolerance = effectiveAngleTolerance(roundRef.current, getTuning().safeAngleTolerance);
       const natural = naturalAngle(stage.lightSources, characterRef.current);
       const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
       // 게임플레이가 진행 중이 아니면(사망 연출·클리어·대사창 표시 중) 회전 루프음을 끈다 —
@@ -491,6 +603,9 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         : undefined;
       const bodyPose: BodyPose = deathInfo ? deathInfo.current : selectBodyPose(margin, isMoving);
       const shadowExpression = selectShadowExpression(margin);
+      const fadeAlpha = roundFadeAlpha(roundFadeStartRef.current, time);
+      // 페이드가 끝나면 시작 시각을 비워 다음 프레임부터 계산 자체를 건너뛴다.
+      if (fadeAlpha <= 0) roundFadeStartRef.current = null;
       // 활성화 상태는 래치라, 한 번 밟은 세이브 포인트는 그 스테이지가 끝날 때까지 유지된다.
       const checkpointsActivated = checkpointsReachedRef.current;
 
@@ -502,7 +617,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         deathInfo,
         checkpointsActivated,
         round: roundRef.current,
-        cleared: clearedRef.current,
+        renderScale: renderScaleRef.current,
+        fadeAlpha,
         dying: dyingRef.current,
         aligned: margin <= 1,
         margin,
@@ -554,7 +670,19 @@ interface RenderState {
   /** `stage.checkpoints`와 순서·길이가 같은 활성화 여부 — 직접 밟은 세이브 포인트를 다른 색으로 표시한다. */
   checkpointsActivated: readonly boolean[];
   round: Round;
-  cleared: boolean;
+  /**
+   * 백킹 스토어 배율 — 논리 좌표(800×600)를 실제 픽셀로 옮기는 기준 변환 값이다.
+   * `canvasRenderScale` 참고. 1이면 예전과 완전히 동일하게 동작한다.
+   */
+  renderScale: number;
+  /**
+   * 라운드 전환 페이드의 검은 오버레이 불투명도(0~1). 0이면 오버레이를 그리지 않는다.
+   *
+   * 예전에는 `cleared: boolean`을 받아 전체 클리어 시 캔버스에 "클리어!" 텍스트를
+   * 그렸다. 그 역할은 엔딩 컷신(`App.tsx`의 `endingSlides` — 사망 횟수·클리어 시간
+   * 요약 포함)이 대신하므로, 이 자리는 라운드 이음매를 가리는 페이드로 바꿨다.
+   */
+  fadeAlpha: number;
   dying: boolean;
   aligned: boolean;
   /** 위험도(alignmentMargin) — 이동 컷아웃의 떨림 강도 계산에 쓴다. */
@@ -727,7 +855,7 @@ function drawRunDustEffect(ctx: CanvasRenderingContext2D, feetX: number, feetY: 
  *
  * 캔버스 변환으로는 ctx.transform(1, 0, -stretch·cosθ, -stretch·sinθ, 0, 0):
  * 로컬 y(발=0, 머리=-h)에 -stretch·(cosθ, sinθ)를 곱해 머리가 캐릭터 위치에서
- * shadowAngle 방향으로 SHADOW_LENGTH만큼 떨어진 지점에 오도록 하고, 로컬
+ * shadowAngle 방향으로 그림자 길이(tuning.shadowLength)만큼 떨어진 지점에 오도록 하고, 로컬
  * x(폭)는 그대로 둬 폭 축이 화면 수평을 유지한다(shadowTip 공식과 동일한
  * cos/sin 규약).
  *
@@ -765,7 +893,7 @@ function drawShadowSprite(
   const scale = BODY_DISPLAY_HEIGHT / img.naturalHeight;
   const w = img.naturalWidth * scale;
   const h = img.naturalHeight * scale;
-  const stretch = (SHADOW_LENGTH / h) * pulse;
+  const stretch = (getTuning().shadowLength / h) * pulse;
   // 전단 변환만 거치면 실루엣이 딱딱한 판때기(사다리꼴) 윤곽으로 보인다는
   // 피드백 — 가장자리를 블러로 부드럽게 풀어 윤곽선을 흐릿하게 만들고,
   // 완전한 검정에 가깝게 어둡혀 그림자다운 무게감을 준다.
@@ -798,7 +926,8 @@ function renderFrame(
     deathInfo,
     checkpointsActivated,
     round,
-    cleared,
+    renderScale,
+    fadeAlpha,
     dying,
     aligned,
     margin,
@@ -811,17 +940,27 @@ function renderFrame(
   // 매 프레임 시작 시 변환 행렬을 단위 행렬로 강제 초기화 — save/restore가
   // 코드상 균형이 맞더라도(각 draw 함수 내부에서 항상 짝을 맞춤), 이 값에
   // 의존하지 않고 방어적으로 리셋해 프레임 간 변환이 누적되는 것을 막는다.
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  //
+  // 단위 행렬 대신 renderScale을 기준 변환으로 깐다 — 아래 모든 그리기는 논리
+  // 좌표(800×600)로 그대로 두고, 고DPI 화면에서만 실제 픽셀이 늘어난다.
+  ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
   ctx.fillStyle = "#111";
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
   // 카메라 — 캐릭터를 화면 중앙에 두고 확대해서, 맵 전체를 축소해 보여주는 대신
   // 캐릭터 주변을 크게 보여준다(시트의 "인게임 느낌" 목업 참고). 맵 가장자리를
   // 벗어나 빈 공간이 보이지 않도록 카메라 위치를 맵 범위 안으로 클램프한다.
+  // 클램프 기준은 캔버스가 아니라 **맵** 크기다 — 맵이 캔버스보다 커질 수 있게
+  // 되면서(`core/tuning.ts`의 `worldCols`/`worldRows`) 둘이 더 이상 같지 않다.
+  // stage.grid에서 직접 읽으므로 맵 크기가 바뀌어도 따로 손댈 곳이 없다.
+  const mapWidth = stage.grid.cols * stage.grid.tileSize;
+  const mapHeight = stage.grid.rows * stage.grid.tileSize;
   const viewW = CANVAS_WIDTH / CAMERA_ZOOM;
   const viewH = CANVAS_HEIGHT / CAMERA_ZOOM;
-  const camX = clamp(characterPos.x - viewW / 2, 0, CANVAS_WIDTH - viewW);
-  const camY = clamp(characterPos.y - viewH / 2, 0, CANVAS_HEIGHT - viewH);
+  // 맵이 화면보다 작으면 clamp의 max가 음수가 되어 min>max로 뒤집힌다 — 그 경우
+  // 0으로 눌러 맵 좌상단을 기준으로 보여준다(빈 공간은 배경색으로 남는다).
+  const camX = clamp(characterPos.x - viewW / 2, 0, Math.max(0, mapWidth - viewW));
+  const camY = clamp(characterPos.y - viewH / 2, 0, Math.max(0, mapHeight - viewH));
 
   ctx.save();
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
@@ -838,7 +977,7 @@ function renderFrame(
   if (isGuideVisible(round)) {
     ctx.beginPath();
     ctx.moveTo(characterPos.x, characterPos.y);
-    ctx.arc(characterPos.x, characterPos.y, SAFE_ZONE_RADIUS, natural - tolerance, natural + tolerance);
+    ctx.arc(characterPos.x, characterPos.y, safeZoneRadius(), natural - tolerance, natural + tolerance);
     ctx.closePath();
     ctx.fillStyle = "rgba(220, 175, 190, 0.25)";
     ctx.fill();
@@ -1021,13 +1160,10 @@ function renderFrame(
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   }
 
-  if (cleared) {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  // 라운드 전환 페이드 — 새 스테이지가 검은 화면에서 밝아진다(ROUND_FADE_MS 참고).
+  // 사망 비네트·플래시보다 뒤에 그려야 전환 순간을 완전히 덮는다.
+  if (fadeAlpha > 0) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${fadeAlpha})`;
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    ctx.fillStyle = "#4caf50";
-    ctx.font = "48px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("클리어!", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-    ctx.textAlign = "left";
   }
 }

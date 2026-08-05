@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { deathFrameInfo, selectBodyPose, selectShadowExpression, shadowVerticalComponent } from "./GameCanvas";
+import {
+  canvasDisplayScale,
+  canvasRenderScale,
+  deathFrameInfo,
+  roundFadeAlpha,
+  selectBodyPose,
+  selectShadowExpression,
+  shadowVerticalComponent,
+} from "./GameCanvas";
 
 describe("selectBodyPose", () => {
   it("이동 중이면 위험도와 무관하게 항상 walk를 반환한다", () => {
@@ -117,5 +125,72 @@ describe("deathFrameInfo", () => {
     expect(info.current).toBe("death1");
     expect(info.next).toBe("death2");
     expect(info.blend).toBeCloseTo(0.5);
+  });
+});
+
+describe("roundFadeAlpha", () => {
+  it("페이드 중이 아니면(시작 시각 null) 0을 반환한다", () => {
+    expect(roundFadeAlpha(null, 1000)).toBe(0);
+  });
+
+  it("전환 직후 첫 프레임은 완전히 검다", () => {
+    expect(roundFadeAlpha(1000, 1000)).toBe(1);
+  });
+
+  it("시간이 지날수록 선형으로 걷힌다", () => {
+    // ROUND_FADE_MS = 550 — 절반 지점에서 0.5
+    expect(roundFadeAlpha(1000, 1000 + 275)).toBeCloseTo(0.5);
+  });
+
+  it("페이드 시간이 지나면 0에서 멈춘다(음수로 내려가지 않는다)", () => {
+    expect(roundFadeAlpha(1000, 1000 + 550)).toBe(0);
+    expect(roundFadeAlpha(1000, 1000 + 5000)).toBe(0);
+  });
+
+  it("타임스탬프가 뒤로 가도 1을 넘지 않는다", () => {
+    expect(roundFadeAlpha(1000, 500)).toBe(1);
+  });
+});
+
+describe("canvasDisplayScale", () => {
+  it("넉넉한 화면에서는 원본 크기(1)를 유지한다 — 확대하지 않는다", () => {
+    expect(canvasDisplayScale(1920, 1080)).toBe(1);
+    expect(canvasDisplayScale(3840, 2160)).toBe(1);
+  });
+
+  it("세로가 좁은 노트북 화면(1366x768)에서는 1보다 작게 줄인다", () => {
+    const scale = canvasDisplayScale(1366, 768);
+    expect(scale).toBeLessThan(1);
+    // 줄어든 캔버스 높이 + 페이지 헤더/푸터가 뷰포트 안에 들어와야 한다
+    expect(600 * scale + 210).toBeLessThanOrEqual(768);
+  });
+
+  it("가로와 세로 중 더 빡빡한 쪽을 따른다", () => {
+    // 가로만 좁은 경우 — 가로 기준이 선택된다
+    const narrow = canvasDisplayScale(600, 2000);
+    expect(narrow).toBeCloseTo((600 - 48) / 800);
+  });
+
+  it("화면이 아주 작아도 하한(0.5) 아래로는 줄이지 않는다", () => {
+    expect(canvasDisplayScale(200, 200)).toBe(0.5);
+  });
+});
+
+describe("canvasRenderScale", () => {
+  it("표준 해상도(dpr 1)에서는 표시 배율을 그대로 쓴다 — 기존 동작과 동일", () => {
+    expect(canvasRenderScale(1, 1)).toBe(1);
+  });
+
+  it("고DPI 화면에서는 백킹 스토어를 기기 픽셀비만큼 키운다", () => {
+    expect(canvasRenderScale(1, 1.5)).toBeCloseTo(1.5);
+  });
+
+  it("상한(2)을 넘지 않는다 — 3x 디스플레이에서도 픽셀 수가 폭발하지 않는다", () => {
+    expect(canvasRenderScale(1, 3)).toBe(2);
+  });
+
+  it("devicePixelRatio가 비정상(0/음수)이면 1로 간주한다", () => {
+    expect(canvasRenderScale(1, 0)).toBe(1);
+    expect(canvasRenderScale(1, -2)).toBe(1);
   });
 });

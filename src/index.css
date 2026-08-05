@@ -1,0 +1,322 @@
+/*
+ * 전역 페이지 셸 — 지금까지 스타일시트가 아예 없어서, 800×600 캔버스가 브라우저
+ * 기본 흰 배경 좌상단에 그대로 붙어 있었다. 게임 화면 자체(캔버스 내부)는 전부
+ * Canvas 2D가 그리므로, 여기서는 "캔버스를 감싸는 페이지"만 담당한다.
+ *
+ * 색은 배경 아트 세계관(저승-이승 경계의 야외 가로등 거리)에 맞춰 어두운 남보라
+ * 계열 + 가로등 불빛의 주황(--accent)으로 맞췄다.
+ */
+
+:root {
+  --bg-deep: #0a0910;
+  --bg-mid: #141222;
+  --panel: rgba(12, 10, 20, 0.72);
+  --text: #e8e4f0;
+  --text-dim: #9a94ad;
+  --accent: #ffb057;
+  --danger: #e53935;
+  --font-ui: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: radial-gradient(ellipse at 50% 0%, var(--bg-mid) 0%, var(--bg-deep) 70%);
+  color: var(--text);
+  font-family: var(--font-ui);
+  /* 캔버스가 화면보다 크면 스크롤이 생기지만, 세로 중앙 정렬은 유지한다. */
+  display: flex;
+  justify-content: center;
+}
+
+#root {
+  width: 100%;
+}
+
+/* ── 페이지 레이아웃 ─────────────────────────────────────────── */
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+}
+
+.page__header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 타이틀 화면 표시 중 — 자리는 유지한 채 보이지만 않게 한다(App.tsx 주석 참고). */
+.page__header--hidden {
+  visibility: hidden;
+}
+
+.page__title {
+  margin: 0;
+  font-size: clamp(22px, 3.2vw, 34px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  /* 제목 자체가 가로등 불빛을 받는 느낌 — 아래로 옅은 그림자를 깐다. */
+  text-shadow: 0 0 24px rgba(255, 176, 87, 0.35);
+}
+
+.page__tagline {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.page__footer {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.7;
+}
+
+.page__footer kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid rgba(232, 228, 240, 0.25);
+  border-radius: 4px;
+  background: rgba(232, 228, 240, 0.06);
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text);
+}
+
+/* ── 게임 프레임 ─────────────────────────────────────────────── */
+
+/*
+ * 오버레이(HUD·대사창·컷신·타이틀)가 `position: absolute; inset: 0`으로 이 요소를
+ * 기준 삼는다. 따라서 크기는 항상 캔버스와 정확히 같아야 한다 — `inline-block`이
+ * 안쪽 캔버스 크기를 그대로 따라가게 두고, 여기에 padding/border를 주지 않는다.
+ * 테두리·그림자는 바깥의 .stage-frame이 담당한다.
+ */
+.stage {
+  position: relative;
+  display: inline-block;
+  line-height: 0; /* 캔버스가 inline이면 생기는 baseline 여백 제거 */
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.stage canvas {
+  display: block;
+}
+
+.stage-frame {
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 176, 87, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 0 60px rgba(255, 176, 87, 0.08),
+    0 18px 50px rgba(0, 0, 0, 0.6);
+  /* 폭이 좁은 화면에서 프레임이 잘려나가지 않도록 */
+  max-width: 100%;
+}
+
+/* ── HUD ────────────────────────────────────────────────────── */
+
+.hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(2px);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  pointer-events: none;
+}
+
+.hud__row {
+  margin: 0;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.hud__label {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.hud__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.hud__demerit {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── 오버레이 버튼 (재시작 / 음소거) ─────────────────────────── */
+
+.overlay-buttons {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+  /* 대사 박스·컷신 등 다른 오버레이가 z-index 없이 DOM 순서로 위에 그려지는 것과
+     무관하게 이 버튼들은 항상 보이고 클릭 가능해야 한다. */
+  z-index: 10;
+}
+
+.overlay-button {
+  padding: 6px 12px;
+  border: 1px solid rgba(232, 228, 240, 0.2);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.overlay-button:hover {
+  background: rgba(40, 34, 56, 0.9);
+  border-color: rgba(255, 176, 87, 0.45);
+}
+
+.overlay-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.overlay-button--muted {
+  color: var(--danger);
+  border-color: rgba(229, 57, 53, 0.45);
+}
+
+/* ── 개발 전용 튜닝 패널 (?tune=1) ───────────────────────────
+   프로덕션 빌드에서는 마운트되지 않는다(core/debugTuning.ts). */
+
+.tuning-panel {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 50;
+  width: 300px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(255, 176, 87, 0.3);
+  border-radius: 8px;
+  background: rgba(10, 9, 16, 0.94);
+  font-size: 12px;
+}
+
+.tuning-panel__header,
+.tuning-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tuning-panel__meta {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.tuning-panel__toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 50;
+  padding: 4px 10px;
+  border: 1px solid rgba(232, 228, 240, 0.25);
+  border-radius: 6px;
+  background: rgba(10, 9, 16, 0.94);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* 패널 안쪽 버튼은 패널 흐름을 따르게 되돌린다 — 위의 fixed는 접힌 상태 버튼용이다. */
+.tuning-panel .tuning-panel__toggle {
+  position: static;
+}
+
+.tuning-field {
+  display: grid;
+  grid-template-columns: 1fr 96px 56px;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+}
+
+.tuning-field--changed {
+  color: var(--accent);
+}
+
+.tuning-field__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 스테이지 재생성이 필요한 항목 표시 */
+.tuning-field__badge::before {
+  content: "●";
+  color: var(--accent);
+  font-size: 8px;
+}
+
+.tuning-field__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tuning-panel__hint {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-align: right;
+}
+
+.tuning-panel__diff {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--accent);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

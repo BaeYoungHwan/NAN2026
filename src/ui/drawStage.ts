@@ -95,9 +95,9 @@ function buildFloorTileLayer(mapWidth: number, mapHeight: number, floorTile: HTM
  * 로드되면 이 절차적 레이어는 건너뛴다(drawStage 참고) — 타일 자체에 이미
  * 풍화·균열 질감이 있어서 같이 쓰면 서로 다른 스케일의 무늬가 겹쳐 오히려
  * 지저분해진다. 결정론적 해시로 고정된 반점 배치를 그리므로 프레임마다
- * 위치가 흔들리지 않는다. 맵 크기(800×600)가 `GRID_COLS`/`GRID_ROWS`/`TILE_SIZE`로
- * 항상 고정이라 stage와 무관하게 한 번만 그려 재사용한다(크기가 바뀌는 경우를
- * 대비해 방어적으로 재생성 체크는 한다).
+ * 위치가 흔들리지 않는다. 이 레이어는 맵 **크기**에만 의존하고 통로 모양과는
+ * 무관하므로 stage별로 캐싱하지 않고 하나를 재사용한다 — 크기가 실제로 바뀌면
+ * (`core/tuning.ts`의 `worldCols`/`worldRows`) 아래 재생성 체크가 다시 그린다.
  */
 let floorGrainLayer: HTMLCanvasElement | null = null;
 
