@@ -185,8 +185,8 @@ function cellProgress(grid: TileGrid, distanceField: Int32Array, cell: Cell): nu
 
 /**
  * 체크포인트·골의 BFS 진행도가 스폰(0)부터 엄격히 오름차순인지 확인한다 —
- * `core/round.ts`의 `progressAt`/`respawnPointFor`/`GameCanvas.tsx`의
- * `justPassedSavePoint`가 모두 "체크포인트 진행도는 오름차순"을 전제한다.
+ * `core/round.ts`의 `respawnPointFor`가 "`checkpoints` 배열의 뒤쪽 인덱스일수록
+ * 진행도가 높다"를 전제로 마지막으로 밟은 체크포인트를 리스폰 지점으로 고른다.
  * 통로 폭이 2칸이라 서로 다른 carve 스텝의 셀이 벽 없이 walkable-인접할 수
  * 있어(진짜 지름길), BFS 거리 기준으로는 carve 순서와 다르게 뒤바뀔 수 있다 —
  * `generateStage`의 재시도 게이트가 이 조건도 함께 확인한다.
