@@ -38,6 +38,13 @@ describe("DialogueBox", () => {
     expect(screen.getByText(/클릭 또는 Enter/)).toBeInTheDocument();
   });
 
+  it("저승사자 초상 이미지를 올바른 경로로 렌더링한다", () => {
+    const { container } = render(<DialogueBox queue={["대사"]} onAdvance={() => {}} />);
+    // alt=""(장식 이미지)는 암묵적 role이 "presentation"이라 getByRole("img")로는
+    // 안 잡힌다 — querySelector로 직접 찾는다.
+    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("reaper-portrait-neutral"));
+  });
+
   describe("autoDismissMs 지정 시", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());

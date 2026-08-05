@@ -4,6 +4,15 @@ import type { SfxCue } from "../audio/soundCues";
 
 const PORTRAIT_SRC = `${import.meta.env.BASE_URL}assets/characters/reaper-portrait-neutral.png`;
 
+// 초상 표시 폭 + 박스 오른쪽 안쪽 오프셋 — portraitStyle.right와 boxStyle의 오른쪽
+// padding이 이 두 값에서 각각 파생된다(아래 두 스타일 선언 참고). 하나로 묶어서
+// 값이 어긋나 텍스트가 초상 밑에 깔리는 회귀를 구조적으로 막는다(PR #23 리뷰).
+const PORTRAIT_WIDTH_PX = 180;
+const PORTRAIT_RIGHT_OFFSET_PX = 8;
+// 원본 크롭 좌표(scripts/crop-reaper.mjs REGIONS[0].w/h = 122/118)와 짝을 이루는
+// aspectRatio — 크롭 좌표를 바꾸면 이 값도 함께 고쳐야 한다.
+const PORTRAIT_ASPECT_RATIO = "122 / 118";
+
 interface DialogueBoxProps {
   /** 표시할 대사 큐 — 비어있으면 렌더링하지 않는다. */
   queue: readonly string[];
@@ -87,18 +96,18 @@ const overlayStyle: CSSProperties = {
 };
 
 // 대화 박스 안, 오른쪽 끝에 배치하는 저승사자 초상 — 시트의 "표정/반응 예시" 그리드
-// 중 기본(평상시) 표정 칸을 크롭한 것(scripts/crop-reaper.mjs). 박스 높이(세로 크기)는
-// 텍스트 기준 그대로 유지하면서 초상 크기도 그대로 키우고 싶다는 요구라, 메이플스토리류
-// NPC 대화창처럼 초상을 박스 레이아웃 흐름 밖으로 빼서(position: absolute) 박스
-// 오른쪽 위 테두리를 뚫고 튀어나오게 배치한다 — 박스 자체 높이는 텍스트만으로 결정되고
-// (portrait가 flex/grid 흐름에 안 끼므로 box를 늘리지 않는다), 초상은 원하는 크기(180px)
-// 그대로 유지된다. bottom을 박스 안쪽에 걸어 "박스 위에 서 있는" 느낌을 준다.
+// 중 기본(평상시) 표정 칸을 크롭한 것(scripts/crop-reaper.mjs). 초상을 박스 레이아웃
+// 흐름 밖으로 빼서(position: absolute) 박스 오른쪽 위 테두리를 뚫고 튀어나오게
+// 배치한다 — 박스 자체 높이는 텍스트로만 결정되고(portrait가 flex/grid 흐름에
+// 안 끼므로 텍스트 줄 수 이상으로 box를 늘리지 않는다), 초상은 원하는 크기
+// (PORTRAIT_WIDTH_PX) 그대로 유지된다. bottom을 박스 안쪽에 걸어 "박스 위에 서
+// 있는" 느낌을 준다.
 const portraitStyle: CSSProperties = {
   position: "absolute",
-  right: 8,
+  right: PORTRAIT_RIGHT_OFFSET_PX,
   bottom: 0,
-  width: 180,
-  aspectRatio: "122 / 118",
+  width: PORTRAIT_WIDTH_PX,
+  aspectRatio: PORTRAIT_ASPECT_RATIO,
   objectFit: "contain",
   pointerEvents: "none",
   filter: "drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))",
@@ -112,9 +121,15 @@ const boxStyle: CSSProperties = {
   boxSizing: "border-box",
   width: "80%",
   maxWidth: 480,
-  // 오른쪽에 튀어나온 초상과 텍스트가 겹치지 않도록 텍스트 쪽만 오른쪽 여백을 크게 둔다 —
-  // 초상 폭(180) + 오른쪽 오프셋(8) = 188px보다 넉넉하게 커야 한다(196으로 여유 8px 추가).
-  padding: "12px 196px 12px 16px",
+  // 좁은 화면(캔버스 축소 렌더링 등)에서 오른쪽 padding이 콘텐츠 폭을 0 이하로
+  // 밀어내 텍스트가 한 글자씩 세로로 흐르거나 박스 밖으로 넘치는 것을 막는
+  // 최소 안전장치(PR #23 리뷰).
+  minWidth: 320,
+  // 오른쪽에 튀어나온 초상과 텍스트가 겹치지 않도록 텍스트 쪽만 오른쪽 여백을 크게
+  // 둔다 — 초상 폭 + 오른쪽 오프셋보다 넉넉하게 커야 한다(여유 8px 추가). 이 폭만큼
+  // 텍스트 컬럼이 좁아져 원래(초상 없을 때)보다 줄바꿈이 늘 수 있다 — 박스 높이가
+  // "텍스트로만 결정"되는 것과 "원래와 완전히 같은 줄 수"는 별개다.
+  padding: `12px ${PORTRAIT_WIDTH_PX + PORTRAIT_RIGHT_OFFSET_PX + 8}px 12px 16px`,
   background: "rgba(20, 20, 20, 0.92)",
   border: "1px solid #666",
   borderRadius: 8,

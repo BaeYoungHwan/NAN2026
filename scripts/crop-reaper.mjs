@@ -22,6 +22,8 @@ const PREVIEW_PATH = "scripts/preview-reaper.png";
 // 배경색(크림)과 달라 플러드필로 안 지워지고 그대로 남았다 — 실제 게임에서
 // "캐릭터에 세로줄이 있다"는 결함으로 보임(PR #23 리뷰). x를 9px 더 오른쪽으로
 // 옮겨 경계선을 완전히 피한다(실측 재확인 — exact-crop-ruler2.png 참고).
+// w/h(122/118)는 src/ui/DialogueBox.tsx의 PORTRAIT_ASPECT_RATIO("122 / 118")와
+// 짝을 이룬다 — 여기서 크롭 좌표를 바꾸면 그쪽도 함께 고쳐야 한다(PR #23 리뷰).
 const REGIONS = [{ name: "reaper-portrait-neutral", x: 1030, y: 50, w: 122, h: 118 }];
 
 async function preview() {
