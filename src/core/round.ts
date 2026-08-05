@@ -28,10 +28,14 @@ export function roundAfterClear(round: Round): { round: Round; cleared: boolean 
  * 세이브 포인트 활성화 반경(px) — 캐릭터 중심이 체크포인트 중심에서 이 거리
  * 안에 들어오면 활성화된다. 통로 폭(2칸 = 80px)의 절반이라, 체크포인트가 놓인
  * 통로를 지나가면 사실상 반드시 접촉한다(체크포인트는 항상 통로 셀 중앙에 있다).
+ * 골 도달 판정에도 같은 반경·함수를 재사용한다(`GameCanvas.tsx`의 `justCleared` 참고).
  */
 export const CHECKPOINT_TOUCH_RADIUS = 40;
 
-/** 캐릭터가 체크포인트를 실제로 밟았는지(활성화 반경 안에 들어왔는지). */
+/**
+ * 캐릭터가 체크포인트를 실제로 밟았는지(활성화 반경 안에 들어왔는지).
+ * 이름은 체크포인트 기준이지만 임의의 지점(골 포함) 접촉 판정에 그대로 쓸 수 있는 범용 함수다.
+ */
 export function hasTouchedCheckpoint(character: Point, checkpoint: Point): boolean {
   return Math.hypot(character.x - checkpoint.x, character.y - checkpoint.y) <= CHECKPOINT_TOUCH_RADIUS;
 }
