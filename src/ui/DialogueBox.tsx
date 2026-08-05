@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import type { CSSProperties } from "react";
 import type { SfxCue } from "../audio/soundCues";
 
+const PORTRAIT_SRC = `${import.meta.env.BASE_URL}assets/characters/reaper-portrait-neutral.png`;
+
 interface DialogueBoxProps {
   /** 표시할 대사 큐 — 비어있으면 렌더링하지 않는다. */
   queue: readonly string[];
@@ -55,6 +57,7 @@ function DialogueBox({ queue, onAdvance, autoDismissMs, playSound }: DialogueBox
 
   return (
     <div style={overlayStyle}>
+      <img src={PORTRAIT_SRC} alt="" style={portraitStyle} />
       <div
         style={boxStyle}
         onClick={() => {
@@ -77,10 +80,23 @@ const overlayStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
   display: "flex",
-  alignItems: "flex-end",
-  justifyContent: "center",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "flex-end",
   paddingBottom: 32,
   pointerEvents: "none",
+};
+
+// 대화 박스 바로 위, 박스 바깥에 크게 띄우는 저승사자 초상 — 시트의 "표정/반응 예시"
+// 그리드 중 기본(평상시) 표정 칸을 크롭한 것(scripts/crop-reaper.mjs). 박스 자체는
+// 계속 세로로 좁게 유지하고(가독성 우선 레이아웃 그대로), 초상만 그 위에 겹치지 않게
+// 별도 요소로 쌓아 "박스 밖에서 말을 거는" 느낌을 준다.
+const portraitStyle: CSSProperties = {
+  width: 96,
+  height: 96,
+  objectFit: "contain",
+  marginBottom: 8,
+  filter: "drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))",
 };
 
 const boxStyle: CSSProperties = {
