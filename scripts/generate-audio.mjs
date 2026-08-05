@@ -218,8 +218,7 @@ function fadeEdges(input, fadeSeconds = 0.005) {
 
 /**
  * 끝단만 페이드아웃한다 — 감쇠 엔벨로프가 0에 닿기 전에 파일이 끝나면 재생 종료
- * 순간 파형이 수직으로 잘려 딸깍거린다(danger-beep은 위험할 때 초당 8회까지
- * 재생되므로 특히 누적되어 들린다). 시작단은 각 레시피의 어택에 맡긴다.
+ * 순간 파형이 수직으로 잘려 딸깍거린다. 시작단은 각 레시피의 어택에 맡긴다.
  */
 function fadeOut(input, fadeSeconds = 0.004) {
   const fade = Math.min(secondsToSamples(fadeSeconds), input.length);
@@ -294,19 +293,6 @@ const LOOPING_CUES = new Set(["sfx/rotate-loop", "bgm/round1", "bgm/round2", "bg
 
 const RECIPES = {
   // --- 그림자 판정 ---------------------------------------------------------
-
-  // 반복 간격이 최대 120ms까지 좁아지므로 잔향 없이 딱 끊겨야 한다 — 꼬리가 남으면
-  // 빨라질 때 소리가 뭉쳐 위험도를 읽을 수 없게 된다.
-  "sfx/danger-beep": () => normalize(osc({ duration: 0.08, freq: 880, amp: decayEnv(45, 0.002) }), 0.85),
-
-  "sfx/safe-return": () =>
-    normalize(
-      mix(
-        tone({ duration: 0.16, freq: NOTES.E5, decay: 14 }),
-        { buffer: tone({ duration: 0.24, freq: NOTES.A5, decay: 11 }), offset: 0.1 },
-      ),
-      0.75,
-    ),
 
   // 회전 키를 누르고 있는 동안 계속 재생 — 브라운 노이즈를 좁게 필터링해 맷돌이
   // 갈리는 질감을 만들고, 5Hz 진폭 변조로 "돌아가는" 주기감을 준다.

@@ -49,9 +49,11 @@ export interface Stage {
   /**
    * 스폰 기준 각 walkable 셀까지의 BFS 최단거리(스텝 수) — `row*cols+col` 인덱스,
    * 미도달 셀은 -1(`procgen/reachability.ts`의 `bfsDistances`). 유클리드 거리와
-   * 달리 벽을 넘어갈 수 없으므로, 이 값을 진척도로 쓰면(`core/round.ts`의
-   * `progressAt`) 벽 건너편의 가까운 지점으로 진행도가 잘못 튀는 일이 구조적으로
-   * 불가능하다.
+   * 달리 벽을 넘어갈 수 없어, `procgen/stageGenerator.ts`가 체크포인트·골 배치를
+   * 검증할 때(`computeCheckpointCells`, `isAscendingProgress`) 벽 건너편의 가까운
+   * 지점을 진행도로 오판하는 일이 구조적으로 불가능하다. 런타임 클리어 판정에는
+   * 더 이상 쓰이지 않는다(`core/round.ts`의 `hasTouchedCheckpoint` 실제 접촉
+   * 판정으로 대체됨 — ADR-003 2026-08-05 기록 참고).
    */
   distanceField: Int32Array;
   /**
