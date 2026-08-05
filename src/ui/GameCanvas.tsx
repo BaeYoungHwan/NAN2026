@@ -31,7 +31,7 @@ import {
   generateStage,
   seedForRound,
 } from "../procgen/stageGenerator";
-import { drawPuddleReflection, drawStage, hexToRgbString } from "./drawStage";
+import { drawStage, hexToRgbString } from "./drawStage";
 import { loadBackgroundArt } from "./backgroundArt";
 import { loadTileArt, type TileArt } from "./tileArt";
 import {
@@ -894,7 +894,7 @@ function renderFrame(
   // 쓰이는(최근접) 광원만 밝게 강조해, 안전 구역이 왜 이동했는지 플레이어가
   // 알아볼 수 있게 한다 (ADR-004).
   const activeLight = nearestLight(stage.lightSources, characterPos);
-  stage.lightSources.forEach((light, lightIndex) => {
+  stage.lightSources.forEach((light) => {
     const isActive = light === activeLight;
     const lanternColor = isActive ? LANTERN_COLOR_ACTIVE : LANTERN_COLOR_INACTIVE;
     const lanternRgb = hexToRgbString(lanternColor);
@@ -912,11 +912,6 @@ function renderFrame(
     ctx.beginPath();
     ctx.arc(light.x, light.y, poolRadius, 0, Math.PI * 2);
     ctx.fill();
-
-    // 웅덩이 반사 — 빛 웅덩이 바로 위에 그려야 안 덮인다(drawPuddleReflection
-    // 주석 참고). 활성/비활성 램프 색(위 pool 그라디언트와 동일한 rgb)을 그대로 써
-    // 이 램프 불빛을 반사하는 것처럼 보이게 한다.
-    drawPuddleReflection(ctx, light, lightIndex, lanternRgb);
 
     // 가로등 실루엣 — 발판(기둥이 땅에 박힌 지점) + 위로 갈수록 가늘어지는 기둥 +
     // 브래킷 + 캡 + 육각 랜턴(속 코어+헤일로) 구조로, 캐릭터 스프라이트와 같은
