@@ -3,6 +3,7 @@ import {
   canvasRenderScale,
   deathFrameInfo,
   roundFadeAlpha,
+  safeZoneWedgeColor,
   selectBodyPose,
   selectShadowExpression,
   shadowVerticalComponent,
@@ -54,6 +55,42 @@ describe("selectShadowExpression", () => {
       if (bodyPose === "flinch") expect(shadowExpression).toBe("surprised");
       if (bodyPose === "danger") expect(shadowExpression).toBe("scared");
     }
+  });
+});
+
+describe("safeZoneWedgeColor", () => {
+  it("위험도가 낮으면(0.6 미만) 기준색(#dcafbe)을 그대로 반환한다", () => {
+    expect(safeZoneWedgeColor(0).stroke).toBe("rgb(220, 175, 190)");
+    expect(safeZoneWedgeColor(0.59).stroke).toBe("rgb(220, 175, 190)");
+  });
+
+  it("위험도 0.85 이상이면 위험색(#d6564f)에 도달한다", () => {
+    expect(safeZoneWedgeColor(0.85).stroke).toBe("rgb(224, 168, 61)");
+    expect(safeZoneWedgeColor(1).stroke).toBe("rgb(214, 86, 79)");
+  });
+
+  it("경고 구간(0.6~0.85) 내부는 안전색과 경고색 사이를 선형 보간한다", () => {
+    const mid = safeZoneWedgeColor(0.725); // 구간 중간
+    expect(mid.stroke).toBe("rgb(222, 172, 126)");
+  });
+
+  it("idle 구간(margin<0.6)에서는 selectBodyPose와 마찬가지로 안전색을 유지한다", () => {
+    // 0.85 이상은 danger 구간이지만, 부채꼴 색은 0.85~1 사이를 마저 보간해 완전한
+    // 위험색은 margin=1에서 도달한다 — 몸 포즈(계단 함수)와 부채꼴 색(연속 보간)의
+    // 의도된 차이이므로 idle 구간만 함께 검증한다.
+    for (const margin of [0, 0.3, 0.59]) {
+      expect(selectBodyPose(margin, false)).toBe("idle");
+      expect(safeZoneWedgeColor(margin).stroke).toBe("rgb(220, 175, 190)");
+    }
+  });
+
+  it("1을 넘는 위험도(이탈 직후)도 위험색에 clamp된다 — 음수·NaN 색으로 새지 않는다", () => {
+    expect(safeZoneWedgeColor(2.5).stroke).toBe("rgb(214, 86, 79)");
+  });
+
+  it("채우기 색은 테두리와 같은 rgb에 낮은 알파(0.25)를 쓴다", () => {
+    const color = safeZoneWedgeColor(0);
+    expect(color.fill).toBe("rgba(220, 175, 190, 0.25)");
   });
 });
 

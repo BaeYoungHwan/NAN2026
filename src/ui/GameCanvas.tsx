@@ -124,6 +124,57 @@ export function selectShadowExpression(margin: number): ShadowExpression {
   return "normal";
 }
 
+interface Rgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+// 안전 구역 가이드 부채꼴(1R 전용)의 3단계 색 — background-art-prompt-guide.md가
+// "안전구역 경계선 UI 전용"으로 예약한 #dcafbe를 안전 단계 기준색으로 그대로 쓰고,
+// 경고·위험 단계는 selectBodyPose/selectShadowExpression과 같은 위험도 신호에서
+// 파생시킨다(새 판정 없음).
+const SAFE_ZONE_COLOR_SAFE: Rgb = { r: 220, g: 175, b: 190 }; // #dcafbe
+const SAFE_ZONE_COLOR_WARN: Rgb = { r: 224, g: 168, b: 61 }; // #e0a83d
+const SAFE_ZONE_COLOR_DANGER: Rgb = { r: 214, g: 86, b: 79 }; // #d6564f
+
+function lerpRgb(from: Rgb, to: Rgb, t: number): Rgb {
+  return {
+    r: from.r + (to.r - from.r) * t,
+    g: from.g + (to.g - from.g) * t,
+    b: from.b + (to.b - from.b) * t,
+  };
+}
+
+/**
+ * 안전 구역 가이드 부채꼴의 채우기/테두리 색 — 위험도(alignmentMargin)에 따라
+ * 안전(#dcafbe) → 경고(#e0a83d) → 위험(#d6564f)로 서서히 물든다. selectBodyPose/
+ * selectShadowExpression과 동일한 0.6/0.85 임계값에서 색 전이가 시작되므로 몸
+ * 포즈가 idle→flinch로 바뀌는 순간 부채꼴도 함께 물들기 시작한다 — 다만 몸
+ * 포즈(계단 함수)와 달리 부채꼴 색은 각 구간을 선형 보간해서 완전한 위험색에는
+ * margin=1(이탈 직전)에야 도달한다. 하드 컷 대신 보간을 쓴 이유: 임계값에서
+ * 색이 뚝 끊기면 그 자체가 판정처럼 오독될 수 있다.
+ *
+ * margin이 1을 넘는 경우(이탈 직후)는 부채꼴 자체가 곧 사망 연출로 가려지지만,
+ * 방어적으로 1로 clamp해 색이 계속 위험색에 머물게 한다.
+ */
+export function safeZoneWedgeColor(margin: number): { fill: string; stroke: string } {
+  const clamped = Math.min(1, Math.max(0, margin));
+  const rgb =
+    clamped < 0.6
+      ? SAFE_ZONE_COLOR_SAFE
+      : clamped < 0.85
+        ? lerpRgb(SAFE_ZONE_COLOR_SAFE, SAFE_ZONE_COLOR_WARN, (clamped - 0.6) / 0.25)
+        : lerpRgb(SAFE_ZONE_COLOR_WARN, SAFE_ZONE_COLOR_DANGER, (clamped - 0.85) / 0.15);
+  const r = Math.round(rgb.r);
+  const g = Math.round(rgb.g);
+  const b = Math.round(rgb.b);
+  return {
+    fill: `rgba(${r}, ${g}, ${b}, 0.25)`,
+    stroke: `rgb(${r}, ${g}, ${b})`,
+  };
+}
+
 // 4단계를 균등 배분하지 않고, ①(비틀거리다 쓰러짐)은 넉넉히 줘서 회전 연출이
 // 읽히게 하고, ②③(그림자가 몸에서 빠져나감)은 길게, ④(빈 인형으로 남음)는
 // 끝에서 가장 오래 유지한다 — 각 시트 설명("경계를 벗어나면 크게 흔들린다"
@@ -1018,20 +1069,25 @@ function renderFrame(
 
   drawStage(ctx, stage, background, checkpointsActivated, round, tiles);
 
-  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 이 연분홍
+  // 안전 구역 가이드라인 — 1R에서만 표시 (2R부터 제거, PRD §7-1). 기준색
   // (#dcafbe)은 background-art-prompt-guide.md 컬러 팔레트가 "안전구역 경계선
   // UI 전용"으로 예약해 둔 포인트색이다. 벽 오버레이는 이 PR에서 석재 턱
   // 재질(따뜻한 무채색, drawStage.ts의 buildWallLayer 참고)로 바뀌었으므로 더
   // 이상 같은 색 계열이 아니다 — "위험 경계"라는 의미는 형태(부채꼴 vs 턱)로만
   // 구분한다.
+  //
+  // 색 자체는 고정이 아니라 margin(safeZoneWedgeColor)에 따라 안전→경고→위험으로
+  // 물든다 — 몸 포즈·그림자 표정과 같은 신호를 그대로 재사용해, 그림자가 경계에
+  // 가까워지는 긴장감을 가이드가 사라지기 전(1R)에 미리 학습시킨다.
   if (isGuideVisible(round)) {
+    const wedgeColor = safeZoneWedgeColor(margin);
     ctx.beginPath();
     ctx.moveTo(characterPos.x, characterPos.y);
     ctx.arc(characterPos.x, characterPos.y, safeZoneRadius(), natural - tolerance, natural + tolerance);
     ctx.closePath();
-    ctx.fillStyle = "rgba(220, 175, 190, 0.25)";
+    ctx.fillStyle = wedgeColor.fill;
     ctx.fill();
-    ctx.strokeStyle = "#dcafbe";
+    ctx.strokeStyle = wedgeColor.stroke;
     ctx.lineWidth = 1;
     ctx.stroke();
   }
