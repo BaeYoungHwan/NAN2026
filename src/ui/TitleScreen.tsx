@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { CSSProperties } from "react";
 import type { SfxCue } from "../audio/soundCues";
+import { ASSET_SOURCE_SITE, BGM_CREDITS, formatCredit } from "../content/credits";
 
 export const GAME_TITLE = "돌려돌려 그림자";
 export const GAME_TAGLINE = "몸과 그림자를 따로 붙잡고 저승의 경계를 건너세요.";
@@ -66,6 +67,12 @@ function TitleScreen({ onStart, playSound }: TitleScreenProps) {
       </p>
 
       <p style={startHintStyle}>Enter — 시작</p>
+
+      {/* BGM 중 2곡이 CC-BY라 저작자 표시가 라이선스상 의무다 — 지울 수 없는 표기다.
+          화면 아래에 고정해 본문 레이아웃(가운데 정렬)에 영향을 주지 않는다. */}
+      <p style={creditStyle}>
+        음악 — {BGM_CREDITS.map(formatCredit).join(" · ")} — {ASSET_SOURCE_SITE}
+      </p>
     </div>
   );
 }
@@ -144,6 +151,23 @@ const startHintStyle: CSSProperties = {
   fontSize: 13,
   color: "#9a94ad",
   letterSpacing: "0.1em",
+};
+
+/**
+ * 크레딧 표기 — 화면 하단 고정. 좁은 화면에서도 잘리지 않도록 줄바꿈을 허용하고,
+ * 본문보다 눈에 띄지 않게 낮은 대비로 둔다(읽을 수는 있어야 하므로 완전히
+ * 흐리게 하지는 않는다 — 라이선스 의무 이행이 목적이다).
+ */
+const creditStyle: CSSProperties = {
+  position: "absolute",
+  left: 16,
+  right: 16,
+  bottom: 10,
+  margin: 0,
+  fontSize: 10,
+  lineHeight: 1.5,
+  color: "#6f6a80",
+  letterSpacing: "0.01em",
 };
 
 export default TitleScreen;

@@ -46,7 +46,14 @@ export interface SfxConfig {
 export interface BgmConfig {
   file: string;
   volume: number;
-  /** 컷신 곡은 한 번만 재생하고 끝난다. */
+  /**
+   * 곡이 끝나면 처음부터 다시 재생할지 여부.
+   *
+   * `opening`은 타이틀 화면과 오프닝 컷신을 함께 덮는데(`App.tsx`), 플레이어가 두
+   * 화면에 머무는 시간이 정해져 있지 않다 — 루프하지 않으면 곡이 끝난 뒤로 무음이
+   * 된다. `ending`은 결과 요약 슬라이드에서 화면이 멈춘 채 유지되므로(CutsceneSlide의
+   * `holdAtEnd`) 곡도 한 번 끝나고 조용해지는 편이 마무리로 자연스럽다.
+   */
   loop: boolean;
 }
 
@@ -71,12 +78,22 @@ export const SFX: Record<SfxCue, SfxConfig> = {
   uiClick: { file: "sfx/ui-click.wav", volume: 0.35, minIntervalMs: 80 },
 };
 
+/**
+ * 배경음 5곡. 전부 OpenGameArt에서 받은 외부 음원이며, 출처·라이선스는
+ * `public/assets/ASSET_SOURCES.md`에 곡별로 기록되어 있다(CC-BY 2곡은 게임 내
+ * 크레딧 표기 의무가 있어 `ui/TitleScreen.tsx`에 표시한다).
+ *
+ * 원본은 곡마다 RMS가 최대 23dB까지 벌어져 있었고 라운드 곡은 끝이 페이드아웃돼
+ * 루프에 부적합했다. 배치 전에 꼬리를 잘라 심리스 루프로 가공하고 RMS를 -20dB로
+ * 맞췄으므로, 아래 volume은 이제 "곡별 보정"이 아니라 순수한 연출 의도다 —
+ * 3R만 살짝 높여 압박감을 준다.
+ */
 export const BGM: Record<BgmCue, BgmConfig> = {
-  round1: { file: "bgm/round1.wav", volume: 0.45, loop: true },
-  round2: { file: "bgm/round2.wav", volume: 0.45, loop: true },
-  round3: { file: "bgm/round3.wav", volume: 0.5, loop: true },
-  opening: { file: "bgm/opening.wav", volume: 0.5, loop: false },
-  ending: { file: "bgm/ending.wav", volume: 0.5, loop: false },
+  round1: { file: "bgm/round1.mp3", volume: 0.45, loop: true },
+  round2: { file: "bgm/round2.mp3", volume: 0.45, loop: true },
+  round3: { file: "bgm/round3.mp3", volume: 0.5, loop: true },
+  opening: { file: "bgm/opening.mp3", volume: 0.5, loop: true },
+  ending: { file: "bgm/ending.mp3", volume: 0.5, loop: false },
 };
 
 export const SFX_CUES = Object.keys(SFX) as SfxCue[];
