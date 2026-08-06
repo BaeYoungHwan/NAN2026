@@ -174,11 +174,11 @@ function lerpRgb(from: Rgb, to: Rgb, t: number): Rgb {
 /**
  * 안전 구역 가이드 부채꼴의 채우기/테두리 색 — 위험도(alignmentMargin)에 따라
  * 안전(#dcafbe) → 경고(#e0a83d) → 위험(#d6564f)로 서서히 물든다. selectBodyPose/
- * selectShadowExpression과 동일한 0.6/0.85 임계값에서 색 전이가 시작되므로 몸
- * 포즈가 idle→flinch로 바뀌는 순간 부채꼴도 함께 물들기 시작한다 — 다만 몸
- * 포즈(계단 함수)와 달리 부채꼴 색은 각 구간을 선형 보간해서 완전한 위험색에는
- * margin=1(이탈 직전)에야 도달한다. 하드 컷 대신 보간을 쓴 이유: 임계값에서
- * 색이 뚝 끊기면 그 자체가 판정처럼 오독될 수 있다.
+ * selectShadowExpression과 같은 CAUTION_MARGIN/DANGER_MARGIN에서 색 전이가
+ * 시작되므로 몸 포즈가 idle→flinch로 바뀌는 순간 부채꼴도 함께 물들기 시작한다 —
+ * 다만 몸 포즈(계단 함수)와 달리 부채꼴 색은 각 구간을 선형 보간해서 완전한
+ * 위험색에는 margin=1(이탈 직전)에야 도달한다. 하드 컷 대신 보간을 쓴 이유:
+ * 임계값에서 색이 뚝 끊기면 그 자체가 판정처럼 오독될 수 있다.
  *
  * margin이 1을 넘는 경우(이탈 직후)는 부채꼴 자체가 곧 사망 연출로 가려지지만,
  * 방어적으로 1로 clamp해 색이 계속 위험색에 머물게 한다.
@@ -186,11 +186,11 @@ function lerpRgb(from: Rgb, to: Rgb, t: number): Rgb {
 export function safeZoneWedgeColor(margin: number): { fill: string; stroke: string } {
   const clamped = Math.min(1, Math.max(0, margin));
   const rgb =
-    clamped < 0.6
+    clamped < CAUTION_MARGIN
       ? SAFE_ZONE_COLOR_SAFE
-      : clamped < 0.85
-        ? lerpRgb(SAFE_ZONE_COLOR_SAFE, SAFE_ZONE_COLOR_WARN, (clamped - 0.6) / 0.25)
-        : lerpRgb(SAFE_ZONE_COLOR_WARN, SAFE_ZONE_COLOR_DANGER, (clamped - 0.85) / 0.15);
+      : clamped < DANGER_MARGIN
+        ? lerpRgb(SAFE_ZONE_COLOR_SAFE, SAFE_ZONE_COLOR_WARN, (clamped - CAUTION_MARGIN) / (DANGER_MARGIN - CAUTION_MARGIN))
+        : lerpRgb(SAFE_ZONE_COLOR_WARN, SAFE_ZONE_COLOR_DANGER, (clamped - DANGER_MARGIN) / (1 - DANGER_MARGIN));
   const r = Math.round(rgb.r);
   const g = Math.round(rgb.g);
   const b = Math.round(rgb.b);
