@@ -24,6 +24,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # 배포 직전 게이트 — main에 직접 push된 변경도 테스트를 통과해야 나간다.
+      # (PR 경로의 같은 검증은 `ci.yml`에 있다.)
+      - run: npm test
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

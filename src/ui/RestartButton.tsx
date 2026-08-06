@@ -1,27 +1,20 @@
-import type { CSSProperties } from "react";
-
 interface RestartButtonProps {
   onRestart: () => void;
 }
 
+/**
+ * 재시작 버튼 — 1R 스폰 상태로 되돌린다(사망 횟수는 유지되는 것이 사양이다,
+ * `GameCanvasHandle.restart` 주석 참고).
+ *
+ * 위치·z-index는 부모인 `.overlay-buttons`(`src/index.css`)가 잡는다. 대사 박스나
+ * 컷신이 DOM 순서로 위에 그려져도 이 버튼들은 항상 보이고 클릭 가능해야 한다.
+ */
 function RestartButton({ onRestart }: RestartButtonProps) {
   return (
-    <button type="button" style={buttonStyle} onClick={onRestart}>
+    <button type="button" className="overlay-button" onClick={onRestart}>
       재시작
     </button>
   );
 }
-
-const buttonStyle: CSSProperties = {
-  position: "absolute",
-  top: 16,
-  right: 16,
-  padding: "8px 16px",
-  fontSize: 14,
-  cursor: "pointer",
-  // 대사 박스·컷신 등 다른 오버레이가 z-index 없이 DOM 순서로 위에 그려지는 것과
-  // 무관하게 재시작 버튼은 항상 보이고 클릭 가능해야 한다.
-  zIndex: 10,
-};
 
 export default RestartButton;

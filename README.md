@@ -14,11 +14,13 @@ NHN 주최 **NAN2026 AI 게임 개발 해커톤** 사전과제 제출용 웹 게
 |---|--------|------|------|-----------|
 | 1 | 플레이 가능한 빌드 및 소스 코드 | 웹(GitHub Pages) + 소스 | ✅ 완료 | https://baeyounghwan.github.io/NAN2026/ |
 | 2 | 플레이 동영상 (30~60초) | YouTube | ⏳ 미착수 | - |
-| 3 | 게임 소개 및 설명 문서 | PDF | ⏳ 미착수 | - |
-| 4 | AI 활용 기술 문서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/ai-usage-report.md`](docs/product-specs/ai-usage-report.md) |
-| 5 | 팀원 롤 기술서 | PDF | 🟡 초안(배영환 파트 완료, 원호 파트 대기) | [`docs/product-specs/team-roles.md`](docs/product-specs/team-roles.md) |
+| 3 | 게임 소개 및 설명 문서 | PDF | 🟡 스크린샷·PDF 완료 (영상 링크 대기) | [`docs/submission/game-intro.md`](docs/submission/game-intro.md) · [PDF](docs/submission/pdf/game-intro.pdf) |
+| 4 | AI 활용 기술 문서 | PDF | 🟡 PDF 완료 (라이선스 최종 확인 대기) | [`docs/submission/ai-usage-report.md`](docs/submission/ai-usage-report.md) · [PDF](docs/submission/pdf/ai-usage-report.pdf) |
+| 5 | 팀원 롤 기술서 | PDF | 🟡 PDF 완료 (팀 검토 대기) | [`docs/submission/team-roles.md`](docs/submission/team-roles.md) · [PDF](docs/submission/pdf/team-roles.pdf) |
 
-플레이 가능 빌드는 배포돼 있지만, PRD 미결 사항(그림자 길이·통로 폭 등, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)이 확정되고 맵 디자인이 반영된 뒤 최종 밸런스로 갱신될 예정입니다.
+PDF는 `node scripts/build-submission-pdf.mjs`로 생성합니다 — 마크다운을 고치면 다시 돌리면 됩니다(외부 의존성 없이 Chrome의 인쇄 기능을 씁니다). 문서용 스크린샷은 `docs/submission/screenshots/`에 있고, 다시 찍은 뒤에는 `node scripts/optimize-screenshots.mjs`로 용량을 정리합니다.
+
+배포본은 2026-08-05에 `develop`의 최신 상태(오디오 시스템, 타일 텍스처, 세이브 포인트 접촉 판정 등 54커밋)로 갱신했습니다. 그 이후의 심사 첫인상 개선(타이틀 화면·HUD 정리·favicon·DPR 대응)과 BGM 외부 음원 교체는 아직 라이브에 반영되지 않았습니다 — PR #26(`develop → main`) 머지 시 함께 배포됩니다. PRD 미결 사항(그림자 길이·허용 각도·회전 속도·가로등 간격·3R 배율, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)을 플레이테스트로 확정하면 최종 밸런스로 한 번 더 갱신할 예정입니다.
 
 ---
 
@@ -68,11 +70,20 @@ npm run preview   # 빌드 결과 로컬 미리보기
 npm test          # vitest 유닛 테스트
 ```
 
+개발 서버에서만 쓸 수 있는 쿼리 파라미터가 두 개 있습니다(프로덕션 빌드에서는 완전히 무시됨):
+
+| 파라미터 | 용도 |
+|----------|------|
+| `?round=2` / `?round=3` | 해당 라운드로 바로 시작 (타이틀·오프닝 건너뜀) |
+| `?tune=1` | 밸런스 튜닝 패널 — 그림자 길이·허용 각도·회전 속도·맵 크기 등을 슬라이더로 실시간 조정 |
+
+`?tune=1` 패널로 조정한 값은 확정 시 [`src/core/tuning.ts`](src/core/tuning.ts)의 `TUNING_DEFAULTS`에 옮겨 적습니다 — 밸런스 파라미터는 전부 이 파일 한 곳에 모여 있습니다.
+
 ## 프로젝트 구조
 
 ```
 src/
-├── core/         # Stage/Round 데이터 계약, 라운드 전이·디메리트 로직, 키보드 입력
+├── core/         # Stage/Round 데이터 계약, 라운드 전이·디메리트 로직, 키보드 입력, 밸런스 파라미터(tuning.ts)
 ├── shadow/       # ShadowCaster(그림자 각도·끝점 계산), ContainmentJudge(안전 구역 판정)
 ├── physics/      # 캐릭터 이동, 벽 충돌(collider)
 ├── procgen/      # 시드 기반 스테이지 절차적 생성(통로 carve, 광원/세이브포인트 배치), 도달가능성 검증

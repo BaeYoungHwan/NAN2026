@@ -9,9 +9,10 @@ PRD와 기획 문서를 여기에 보관합니다.
 | 문서 | 버전 | 상태 | 생성일 |
 |------|------|------|--------|
 | [`PRD-v1.md`](PRD-v1.md) | v1 | Draft | 2026-07-22 |
-| [`ai-usage-report.md`](ai-usage-report.md) | v1 | Draft | 2026-08-03 |
-| [`team-roles.md`](team-roles.md) | v1 | Draft | 2026-08-03 |
-| [`game-intro.md`](game-intro.md) | v1 | Draft | 2026-08-03 |
+
+> 사전과제 제출물 3종(`ai-usage-report.md`, `team-roles.md`, `game-intro.md`)은
+> `docs/submission/`으로 이동했습니다 — 기획/작업용 문서와 제출용 최종본을
+> 디렉터리로 분리(PR #23 리뷰 반영, 2026-08-05).
 
 ---
 

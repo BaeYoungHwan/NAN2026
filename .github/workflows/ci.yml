@@ -1,0 +1,24 @@
+# 게임 코드(src/) 검증 게이트 — PR을 머지하기 전에 타입체크·빌드·테스트를 돌린다.
+#
+# `deploy-pages.yml`은 main에 들어온 뒤에야 돌기 때문에, 이 워크플로가 없으면
+# 깨진 PR이 초록불로 머지된다(라이선스 표기 회귀 테스트 포함). main push는
+# deploy-pages 쪽에서 같은 검증을 하므로 여기서는 pull_request만 받는다.
+# `hooks-test.yml`은 하네스 훅(bash) 전용이라 vitest를 돌리지 않는다.
+name: ci
+on:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # tsc -b + vite build
+      - run: npm run build
+      - run: npm test

@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 상대 경로 — GitHub Pages는 base가 `/NAN2026/`이고 로컬 dev는 `/`라, 앞에
+         슬래시를 붙이면 배포에서 404가 난다. -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>돌려돌려 그림자</title>
+    <meta
+      name="description"
+      content="캐릭터와 그림자를 동시에 조종하는 키보드 전용 액션 퍼즐. 그림자가 안전 구역을 벗어나면 즉사합니다."
+    />
   </head>
   <body>
     <div id="root"></div>

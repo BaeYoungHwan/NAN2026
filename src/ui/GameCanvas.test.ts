@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { deathFrameInfo, selectBodyPose, selectShadowExpression, shadowVerticalComponent } from "./GameCanvas";
+import {
+  canvasRenderScale,
+  deathFrameInfo,
+  roundFadeAlpha,
+  selectBodyPose,
+  selectShadowExpression,
+  shadowVerticalComponent,
+} from "./GameCanvas";
 
 describe("selectBodyPose", () => {
   it("이동 중이면 위험도와 무관하게 항상 walk를 반환한다", () => {
@@ -117,5 +124,63 @@ describe("deathFrameInfo", () => {
     expect(info.current).toBe("death1");
     expect(info.next).toBe("death2");
     expect(info.blend).toBeCloseTo(0.5);
+  });
+});
+
+describe("roundFadeAlpha", () => {
+  it("페이드 중이 아니면(시작 시각 null) 0을 반환한다", () => {
+    expect(roundFadeAlpha(null, 1000)).toBe(0);
+  });
+
+  it("전환 직후 첫 프레임은 완전히 검다", () => {
+    expect(roundFadeAlpha(1000, 1000)).toBe(1);
+  });
+
+  it("시간이 지날수록 선형으로 걷힌다", () => {
+    // ROUND_FADE_MS = 550 — 절반 지점에서 0.5
+    expect(roundFadeAlpha(1000, 1000 + 275)).toBeCloseTo(0.5);
+  });
+
+  it("페이드 시간이 지나면 0에서 멈춘다(음수로 내려가지 않는다)", () => {
+    expect(roundFadeAlpha(1000, 1000 + 550)).toBe(0);
+    expect(roundFadeAlpha(1000, 1000 + 5000)).toBe(0);
+  });
+
+  it("타임스탬프가 뒤로 가도 1을 넘지 않는다", () => {
+    expect(roundFadeAlpha(1000, 500)).toBe(1);
+  });
+});
+
+describe("canvasRenderScale", () => {
+  it("논리 크기 그대로 표시되고 dpr이 1이면 배율도 1 — 예전과 동일한 동작", () => {
+    expect(canvasRenderScale(800, 1)).toBe(1);
+  });
+
+  it("고DPI 화면에서는 백킹 스토어를 기기 픽셀비만큼 키운다", () => {
+    expect(canvasRenderScale(800, 1.5)).toBeCloseTo(1.5);
+    expect(canvasRenderScale(800, 2)).toBeCloseTo(2);
+  });
+
+  it("CSS로 축소된 만큼 배율도 함께 줄어든다 — 표시 폭에 비례한다", () => {
+    expect(canvasRenderScale(400, 1)).toBeCloseTo(0.5);
+    expect(canvasRenderScale(600, 1)).toBeCloseTo(0.75);
+  });
+
+  it("축소와 고DPI가 겹치면 곱해진다 — 작게 보여도 선명함은 유지된다", () => {
+    expect(canvasRenderScale(400, 2)).toBeCloseTo(1);
+  });
+
+  it("상한(2)을 넘지 않는다 — 3x 디스플레이에서도 픽셀 수가 폭발하지 않는다", () => {
+    expect(canvasRenderScale(800, 3)).toBe(2);
+    expect(canvasRenderScale(1600, 2)).toBe(2);
+  });
+
+  it("devicePixelRatio가 비정상(0/음수)이면 1로 간주한다", () => {
+    expect(canvasRenderScale(800, 0)).toBe(1);
+    expect(canvasRenderScale(800, -2)).toBe(1);
+  });
+
+  it("표시 폭이 0이어도 하한 아래로 내려가지 않는다 — 레이아웃 전 방어값", () => {
+    expect(canvasRenderScale(0, 1)).toBe(0.25);
   });
 });

@@ -1,18 +1,21 @@
 import type { Round } from "../core/round";
 import type { Point, Stage, TileGrid } from "../core/stage";
+import { getTuning } from "../core/tuning";
 import { bfsDistances } from "./reachability";
 
 export const CANVAS_WIDTH = 800;
 export const CANVAS_HEIGHT = 600;
 
 const TILE_SIZE = 40;
-const GRID_COLS = CANVAS_WIDTH / TILE_SIZE; // 20
-const GRID_ROWS = CANVAS_HEIGHT / TILE_SIZE; // 15
-const CORRIDOR_WIDTH = 2; // 셀 단위 — 80px 폭
-const PATH_STEPS = 80; // Jump King식 난이도 실험값(기존 40) — 체크포인트 간 구간을 늘려 사망 시 손실 거리를 키움
-const STRAIGHT_BIAS = 0.75; // 직진 방향이 있을 때 그 방향을 고를 확률
-const MIN_SPAN_CELLS = 16; // Jump King식 난이도 실험값(기존 10) — 스폰-골 최소 직선거리(칸), 미달이면 재시도
-// MIN_SPAN_CELLS을 10→16으로 올리면서 기존 재시도 예산(5회)으로는 1000시드 중 약 10%가
+// 맵 크기(셀)는 `core/tuning.ts`의 `worldCols`/`worldRows`가 결정한다 — 예전에는
+// `CANVAS_WIDTH / TILE_SIZE`로 캔버스에 묶여 있어 맵이 화면보다 클 수 없었다.
+// 기본값은 20×15로 예전과 동일해서, 값을 바꾸지 않는 한 생성 결과가 완전히 같다.
+// 통로 폭·carve 스텝·직진 편향·최소 스폰-골 거리·세이브 포인트 개수·가로등 간격은
+// 전부 `core/tuning.ts`로 옮겼다 — 확정해야 할 밸런스 값을 한 파일에서 보기 위함.
+// 아래 함수들은 `getTuning()`으로 그때그때 읽는다(모듈 로드 시점에 박아두면
+// 개발용 튜닝 패널의 오버라이드가 반영되지 않는다).
+//
+// 최소 스폰-골 거리를 10→16으로 올리면서 기존 재시도 예산(5회)으로는 1000시드 중 약 10%가
 // 목표 미달로 폴백되는 것을 실측(최악 span=0, 사실상 깨진 맵)했다 — 재시도 예산을 30회로
 // 올려 해소했었다. 이후 진척도 오름차순 조건(`isAscendingProgress`, 벽 없이 인접한 두
 // carve 구간 사이의 진짜 지름길 때문에 발생)이 재시도 게이트에 추가되면서 30회로는
@@ -21,39 +24,7 @@ const MIN_SPAN_CELLS = 16; // Jump King식 난이도 실험값(기존 10) — �
 // 체감 지연 없음(1000시드 전체 생성 486ms).
 const MAX_GENERATION_ATTEMPTS = 200;
 
-/**
- * 스테이지(라운드) 내부에 두는 세이브 포인트 개수 — 라운드 개수(`core/round.ts`의
- * `MAX_ROUND`)와는 별개의 독립 파라미터다. 라운드마다 독립 스테이지로 전환하는
- * 구조로 바뀌면서, "체크포인트 개수"와 "라운드 개수"가 서로 다른 개념임을 분리했다.
- *
- * 라운드당 1개 — 코스 중간(진행도 50%) 한 곳에만 둔다. 2개였을 때는 세이브
- * 포인트 간격이 너무 촘촘해 사망 페널티가 거의 사라졌다.
- */
-const SAVE_POINTS_PER_STAGE = 1;
-
-/** 가로등 배치 간격(경로 스텝 기준) — 임시값. 실제 값은 P1 플레이테스트로 확정한다 (PRD §12, ADR-004). */
-const LIGHT_SPACING_STEPS = 8;
-
 export const DEFAULT_SEED = 12345;
-
-/** 그림자 길이(ℓ) — 임시 상수. 실제 값은 P1 플레이테스트로 확정한다 (PRD §12 미결). */
-export const SHADOW_LENGTH = 80;
-
-/** 안전 구역 허용 각도(라디안, ±) — 임시 상수. 실제 값은 P1 플레이테스트로 확정한다. */
-export const SAFE_ANGLE_TOLERANCE = Math.PI / 6; // ±30도
-
-/** 그림자 회전 속도 (라디안/초) — 임시 상수. */
-export const ROTATION_SPEED = Math.PI; // 180도/초
-
-/**
- * 최근접 광원이 바뀌는 순간, 이 시간(초) 동안은 정렬 판정을 건너뛴다 — 임시 상수.
- * 광원 전환 시 요구 각도가 최대 180도 가까이 순간적으로 바뀔 수 있는데(ADR-004),
- * 회전 속도(ROTATION_SPEED)로는 한 프레임 안에 따라잡을 수 없어 무조건 죽게 된다.
- * 전환 직후 잠깐의 유예를 둬서 플레이어가 새 각도로 돌릴 시간을 준다.
- * 값 산정: 최악의 경우(180도) 회전에 걸리는 시간(π/ROTATION_SPEED ≈ 1초) + 반응 여유.
- * 실제 값은 P1 플레이테스트로 확정한다 (PRD §12).
- */
-export const LIGHT_SWITCH_GRACE_SECONDS = 1.2;
 
 /** 결정론적 시드 기반 PRNG (mulberry32) — 같은 시드는 항상 같은 스테이지를 만든다. */
 function createRng(seed: number): () => number {
@@ -113,8 +84,9 @@ const DIRECTIONS: ReadonlyArray<readonly [number, number]> = [
 ];
 
 function carveAt(grid: TileGrid, col: number, row: number): void {
-  for (let dc = 0; dc < CORRIDOR_WIDTH; dc++) {
-    for (let dr = 0; dr < CORRIDOR_WIDTH; dr++) {
+  const { corridorWidth } = getTuning();
+  for (let dc = 0; dc < corridorWidth; dc++) {
+    for (let dr = 0; dr < corridorWidth; dr++) {
       const cc = col + dc;
       const rr = row + dr;
       if (cc >= 0 && cc < grid.cols && rr >= 0 && rr < grid.rows) {
@@ -129,11 +101,12 @@ function carveAt(grid: TileGrid, col: number, row: number): void {
  * - 역주행(직전 방향의 반대)은 금지한다.
  * - 아직 지나오지 않은 셀로 이어지는 방향을 우선한다 — 그러지 않으면 통로가
  *   스스로 겹치며 좁은 구역 안에서 맴돌아 스폰-골 거리가 거의 0에 가까워진다.
- * - 직진 방향이 후보에 있으면 STRAIGHT_BIAS 확률로 그 방향을 선택해, 통로가
+ * - 직진 방향이 후보에 있으면 straightBias 확률로 그 방향을 선택해, 통로가
  *   구불구불하게 제자리에서 꺾이지 않고 뻗어나가게 한다.
  * 반환값은 지나온 셀 목록 — 첫 번째가 스폰, 마지막이 골이다.
  */
 function carveCorridor(grid: TileGrid, start: Cell, rng: () => number): Cell[] {
+  const { corridorWidth, pathSteps, straightBias } = getTuning();
   const path: Cell[] = [start];
   const visited = new Set<string>([`${start.col},${start.row}`]);
   let { col, row } = start;
@@ -141,12 +114,12 @@ function carveCorridor(grid: TileGrid, start: Cell, rng: () => number): Cell[] {
 
   carveAt(grid, col, row);
 
-  for (let step = 0; step < PATH_STEPS; step++) {
+  for (let step = 0; step < pathSteps; step++) {
     const candidates = DIRECTIONS.filter(([dc, dr]) => {
       if (lastDir && dc === -lastDir[0] && dr === -lastDir[1]) return false;
       const nc = col + dc;
       const nr = row + dr;
-      return nc >= 0 && nc + CORRIDOR_WIDTH - 1 < grid.cols && nr >= 0 && nr + CORRIDOR_WIDTH - 1 < grid.rows;
+      return nc >= 0 && nc + corridorWidth - 1 < grid.cols && nr >= 0 && nr + corridorWidth - 1 < grid.rows;
     });
 
     if (candidates.length === 0) break;
@@ -158,7 +131,7 @@ function carveCorridor(grid: TileGrid, start: Cell, rng: () => number): Cell[] {
     const straight: Array<readonly [number, number]> = capturedLastDir
       ? pool.filter(([dc, dr]) => dc === capturedLastDir[0] && dr === capturedLastDir[1])
       : [];
-    const weighted = straight.length > 0 && rng() < STRAIGHT_BIAS ? straight : pool;
+    const weighted = straight.length > 0 && rng() < straightBias ? straight : pool;
 
     const [dc, dr] = weighted[Math.floor(rng() * weighted.length)];
     col += dc;
@@ -226,11 +199,12 @@ function attemptGeneration(seed: number, start: Cell): GenerationAttempt {
 }
 
 function createEmptyGrid(): TileGrid {
+  const { worldCols, worldRows } = getTuning();
   return {
-    cols: GRID_COLS,
-    rows: GRID_ROWS,
+    cols: worldCols,
+    rows: worldRows,
     tileSize: TILE_SIZE,
-    cells: new Uint8Array(GRID_COLS * GRID_ROWS).fill(1),
+    cells: new Uint8Array(worldCols * worldRows).fill(1),
   };
 }
 
@@ -239,7 +213,7 @@ function createEmptyGrid(): TileGrid {
  * 같은 시드는 항상 같은 스테이지를 만든다 — 디버깅·테스트를 위해 결정론적으로 설계함.
  * 라운드마다 독립적으로 호출되며(`seedForRound`), 한 번의 호출 결과가 한 라운드 전체를 이룬다.
  *
- * 스폰-골 직선거리가 MIN_SPAN_CELLS에 못 미치거나(통로가 너무 짧게 뭉치면),
+ * 스폰-골 직선거리가 minSpanCells에 못 미치거나(통로가 너무 짧게 뭉치면),
  * 스폰/체크포인트/골 중 실제 좌표가 겹치는 게 있거나(막다른 곳에서 재방문된
  * 셀이 하필 체크포인트 인덱스와 겹치는 드문 경우), 체크포인트·골의 BFS
  * 진행도가 오름차순이 아니면(통로 폭 2칸으로 생긴 지름길 때문에 드물게 발생,
@@ -247,7 +221,8 @@ function createEmptyGrid(): TileGrid {
  * 마지막 결과를 그대로 사용한다.
  */
 export function generateStage(seed: number): Stage {
-  const start: Cell = { col: 1, row: GRID_ROWS - 3 };
+  // 스폰은 맵 좌하단 근처 — 맵 크기가 바뀌어도 같은 상대 위치를 유지한다.
+  const start: Cell = { col: 1, row: getTuning().worldRows - 3 };
 
   let currentSeed = seed;
   let attemptResult = attemptGeneration(currentSeed, start);
@@ -263,7 +238,7 @@ export function generateStage(seed: number): Stage {
     // 통로가 극단적으로 짧으면 원리적으로 겹칠 수 있어 게이트는 그대로 둔다.
     const distinctCells = hasDistinctCells([spawnCell, ...checkpointCells, goalCell]);
     const ascendingProgress = isAscendingProgress(checkpointProgress, goalProgress);
-    if (span >= MIN_SPAN_CELLS && distinctCells && ascendingProgress) break;
+    if (span >= getTuning().minSpanCells && distinctCells && ascendingProgress) break;
 
     currentSeed = deriveSeed(currentSeed);
     attemptResult = attemptGeneration(currentSeed, start);
@@ -328,7 +303,7 @@ function findAdjacentWallCell(grid: TileGrid, cell: Cell): Cell | null {
 }
 
 /**
- * 통로 경로를 따라 LIGHT_SPACING_STEPS 간격으로, 경로 옆 벽 셀에 가로등을
+ * 통로 경로를 따라 lightSpacingSteps 간격으로, 경로 옆 벽 셀에 가로등을
  * 배치한다(ADR-004) — 벽 위이므로 캐릭터가 닿을 수 없고, walkable 지점(스폰·
  * 골·체크포인트)과 좌표가 겹칠 일도 구조적으로 없다. 경로 끝(골 근처)이
  * 마지막 간격에 걸리지 않으면 골 쪽에도 하나 추가해 고르게 분포시킨다.
@@ -352,12 +327,13 @@ function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
     sources.push(cellCenter(grid.tileSize, wallCell.col, wallCell.row));
   };
 
-  for (let i = 0; i < path.length; i += LIGHT_SPACING_STEPS) {
+  const { lightSpacingSteps } = getTuning();
+  for (let i = 0; i < path.length; i += lightSpacingSteps) {
     addNearWall(path[i]);
   }
 
   const lastIdx = path.length - 1;
-  if (lastIdx % LIGHT_SPACING_STEPS !== 0) {
+  if (lastIdx % lightSpacingSteps !== 0) {
     addNearWall(path[lastIdx]);
   }
 
@@ -365,8 +341,6 @@ function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
   // 경로 전체를 순회하며 벽 셀을 찾을 때까지 재시도한다 — walkable 셀을 광원
   // 좌표로 대체하는 예외는 두지 않는다. "광원은 항상 벽 위에 있다"는
   // 불변조건(stageGenerator.test.ts로 고정됨)을 이 폴백도 반드시 지켜야 한다.
-  // 통로 폭 2칸은 20x15 그리드에서 항상 벽에 둘러싸이므로(시드 1~2000 검증됨)
-  // 이 루프가 실패하는 경우는 실질적으로 없다.
   if (sources.length === 0) {
     for (const cell of path) {
       addNearWall(cell);
@@ -374,7 +348,43 @@ function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
     }
   }
 
+  // 그래도 못 찾았으면 탐색 반경을 아예 풀고 그리드 전체에서 가장 가까운 벽 셀을
+  // 고른다. `WALL_SEARCH_OFFSETS`는 최대 2칸까지만 보기 때문에, 통로 폭이 넓으면
+  // (튜닝 패널에서 corridorWidth를 4까지 올릴 수 있다) 경로의 모든 셀이 벽에서
+  // 2칸 넘게 떨어져 광원이 **하나도** 배치되지 않는다 — 실측으로 corridorWidth 4에서
+  // 400시드 중 7개가 여기 걸렸고, 그 스테이지는 첫 프레임에 `nearestLight`가 터지며
+  // 게임 루프가 죽었다. 그리드는 전부 벽인 상태에서 통로를 파낸 것이라 남은 벽이
+  // 반드시 있고, 이 전역 스캔은 광원이 0개인 스테이지에서만(드묾) 한 번 돈다.
+  if (sources.length === 0) {
+    const anchor = path[Math.floor(path.length / 2)];
+    const wallCell = nearestWallCellInGrid(grid, anchor);
+    if (wallCell) {
+      sources.push(cellCenter(grid.tileSize, wallCell.col, wallCell.row));
+    }
+  }
+
   return sources;
+}
+
+/** 그리드 전체에서 기준 셀과 가장 가까운 벽 셀. 벽이 하나도 없으면 null. */
+function nearestWallCellInGrid(grid: TileGrid, from: Cell): Cell | null {
+  let closest: Cell | null = null;
+  let closestDistSq = Infinity;
+
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      if (grid.cells[row * grid.cols + col] !== 1) continue;
+      const dc = col - from.col;
+      const dr = row - from.row;
+      const distSq = dc * dc + dr * dr;
+      if (distSq < closestDistSq) {
+        closestDistSq = distSq;
+        closest = { col, row };
+      }
+    }
+  }
+
+  return closest;
 }
 
 /**
@@ -406,7 +416,7 @@ function shortestPathCells(grid: TileGrid, distanceField: Int32Array, goalCell: 
 }
 
 /**
- * 세이브 포인트를 놓을 셀을 `SAVE_POINTS_PER_STAGE`개 고른다 — `generateStage`가
+ * 세이브 포인트를 놓을 셀을 `savePointsPerStage`(`core/tuning.ts`)개 고른다 — `generateStage`가
  * 이 셀의 중심 좌표를 `checkpoints`로 변환해 런타임 접촉 판정(`core/round.ts`의
  * `hasTouchedCheckpoint`)에 쓴다.
  *
@@ -428,7 +438,7 @@ function shortestPathCells(grid: TileGrid, distanceField: Int32Array, goalCell: 
  * 최단 경로 셀의 진행도는 0부터 `goalProgress`까지 1씩 빠짐없이 나타나므로, 어떤
  * 분할 목표값이든 항상 가장 가까운 후보를 찾을 수 있다. 스폰(진행도 0)·골
  * (`goalProgress`)과 겹치지 않도록 양 끝은 후보에서 제외한다 — 경로가 극단적으로
- * 짧아 내부 칸이 없는 경우만 겹칠 수 있고, 그건 `generateStage`의 `MIN_SPAN_CELLS`
+ * 짧아 내부 칸이 없는 경우만 겹칠 수 있고, 그건 `generateStage`의 `minSpanCells`
  * 재시도 게이트가 걸러낸다.
  */
 export function computeCheckpointCells(
@@ -441,8 +451,9 @@ export function computeCheckpointCells(
   const candidates = route.slice(1, -1); // 스폰·골 제외
   if (candidates.length === 0) return [];
 
-  return Array.from({ length: SAVE_POINTS_PER_STAGE }, (_, i) => {
-    const target = (goalProgress * (i + 1)) / (SAVE_POINTS_PER_STAGE + 1);
+  const { savePointsPerStage } = getTuning();
+  return Array.from({ length: savePointsPerStage }, (_, i) => {
+    const target = (goalProgress * (i + 1)) / (savePointsPerStage + 1);
     return candidates.reduce((best, cell) => {
       const diff = Math.abs(cellProgress(grid, distanceField, cell) - target);
       const bestDiff = Math.abs(cellProgress(grid, distanceField, best) - target);

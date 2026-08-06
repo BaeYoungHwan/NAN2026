@@ -1,4 +1,5 @@
 import type { Point } from "./stage";
+import { getTuning } from "./tuning";
 
 export type Round = 1 | 2 | 3;
 
@@ -67,15 +68,16 @@ export function isDemeritRound(round: Round): boolean {
   return round === 3;
 }
 
-/** 3R 디메리트 — 허용 각도 축소 배율. 임시값, P1 플레이테스트로 확정한다 (PRD §12). */
-export const ROUND_3_TOLERANCE_MULTIPLIER = 0.5;
-
 /**
- * 라운드별 실제 적용 허용 각도. 3R에서는 기본 허용 각도를 절반으로 줄여
- * 정렬을 더 엄격하게 요구한다 — PRD §7-1 3R 디메리트.
+ * 라운드별 실제 적용 허용 각도. 3R에서는 기본 허용 각도를 `round3ToleranceMultiplier`
+ * 배로 줄여 정렬을 더 엄격하게 요구한다 — PRD §7-1 3R 디메리트.
+ *
+ * 배율은 `core/tuning.ts`에 있다(확정 대상 값이라 다른 밸런스 값과 함께 모아둠).
+ * 모듈 로드 시점에 읽지 않고 호출할 때마다 읽으므로, 개발용 튜닝 패널로 배율을
+ * 바꾸면 그 즉시 다음 프레임 판정에 반영된다.
  */
 export function effectiveAngleTolerance(round: Round, baseTolerance: number): number {
-  return isDemeritRound(round) ? baseTolerance * ROUND_3_TOLERANCE_MULTIPLIER : baseTolerance;
+  return isDemeritRound(round) ? baseTolerance * getTuning().round3ToleranceMultiplier : baseTolerance;
 }
 
 /**
