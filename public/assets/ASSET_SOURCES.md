@@ -24,12 +24,26 @@
 | `opening.mp3` | **Intro Music** / RonyDkid | CC0 (표기 불필요) | <https://opengameart.org/content/intro-music-0> |
 | `round1.mp3` | **Dark Theme** / JaggedStone | CC0 (표기 불필요) | <https://opengameart.org/content/dark-theme> |
 | `round2.mp3` | **Dark Shrine Loop** / qubodup (yd의 LMMS 곡 "Shrine" 리믹스) | CC0 (표기 불필요) | <https://opengameart.org/content/dark-shrine-loop> |
-| `round3.mp3` | **Mystical Theme** / Alexandr Zhelanov | **CC-BY 3.0 — 저작자 표시 의무** | <https://opengameart.org/content/mystical-theme> |
-| `ending.mp3` | **Epilogue** / tcarisland | **CC-BY 4.0 — 저작자 표시 + 변경 사항 표시 의무** | <https://opengameart.org/content/epilogue> |
+| `round3.mp3` | **Mystical Theme** / Alexandr Zhelanov | **CC-BY 3.0 — 저작자 표시 + 변경 사항 표시 의무** | <https://opengameart.org/content/mystical-theme> |
+| `ending.mp3` | **Epilogue** / tcarisland | **CC-BY 4.0 — 저작자 표시 + 변경 사항 표시 + 라이선스 URI 의무** | <https://opengameart.org/content/epilogue> |
+
+라이선스 전문:
+
+- CC0 1.0 — <https://creativecommons.org/publicdomain/zero/1.0/>
+- CC BY 3.0 — <https://creativecommons.org/licenses/by/3.0/>
+- CC BY 4.0 — <https://creativecommons.org/licenses/by/4.0/>
 
 ### 게임 내 표기
 
 CC-BY 2곡의 표시 의무는 `src/content/credits.ts`에 데이터를 두고 **타이틀 화면 하단**에 렌더해 이행한다. 표기 의무가 없는 CC0 3곡도 같은 줄에 함께 적는다 — 어느 곡이 어떤 조건인지 한눈에 보이고, 곡 교체 시 의무 있는 항목만 골라내다 빠뜨리는 사고를 막는다.
+
+화면에 나가는 것은 저작자 이름만이 아니다. CC BY가 요구하는 세 가지를 모두 싣는다(빠지면 `src/ui/TitleScreen.test.tsx`가 실패한다):
+
+1. **저작자·제목**(§3(a)(1)(A) / 3.0 §4(c)) — `제목 (저작자, 라이선스, …)` 형태. 구현은 `formatCredit()`.
+2. **변경 사실**(§3(a)(1)(B) / 3.0 §4(c)) — 아래 "가공 내역"대로 원본을 그대로 쓰지 않았으므로 곡마다 `편집됨`을 붙인다. 구현은 `AssetCredit.modified`.
+3. **라이선스 전문 URI**(§3(a)(1)(C)) — `CC BY 4.0`이라는 이름만으로는 부족하다. 같은 라이선스를 여러 곡이 공유하므로 중복을 없앤 URI 목록(`LICENSE_URLS`)을 크레딧 둘째 줄에 한 번만 싣는다.
+
+크레딧을 담은 `<p>`에는 클릭 핸들러를 걸지 않는다 — 타이틀 화면 오버레이는 좁은 화면에서 스크롤되는데, 스크롤 컨테이너에 "클릭하면 게임 시작"을 걸어두면 **스크롤바 트랙을 클릭하는 것만으로 게임이 시작된다**(실측으로 재현). 하필 스크롤이 생기는 상황이 이 크레딧을 읽으려 내리는 순간이라, 시작 입력은 본문 영역에만 받는다.
 
 ### 가공 내역 (원본을 그대로 쓰지 않았다)
 

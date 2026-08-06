@@ -18,10 +18,14 @@
 //     보정이 아니라 순수한 연출 의도로 남게 한다.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** 저장소 루트 — 출력 경로를 여기 기준으로 잡는다(실행 위치와 무관하게 같은 곳에 쓰기 위함). */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const SR = 44100;
 
@@ -234,13 +238,37 @@ function normalize(chans) {
 
 // --- 실행 ------------------------------------------------------------------
 
+/** 원본 목록 안내 — 인자가 없을 때도, 파일을 못 찾았을 때도 같은 내용을 보여준다. */
+function printSourceList() {
+  console.error("필요한 원본 파일 (저장소에 없음 — 아래에서 받아 원본 폴더에 넣으세요):\n");
+  for (const { slot, source, title, url } of SLOTS) {
+    console.error(`  [${slot}] ${source}`);
+    console.error(`      ${title} — ${url}`);
+  }
+  console.error(
+    "\n※ 받은 파일 이름이 위와 다르면(브라우저가 URL 인코딩해 저장하는 경우가 있습니다)" +
+      "\n   위 이름으로 바꿔주세요. 내용만 같으면 됩니다.",
+  );
+}
+
 const srcDir = process.argv[2];
-const outDir = process.argv[3] ?? "public/assets/audio/bgm";
+// 출력은 실행 위치가 아니라 저장소 기준이다 — 다른 디렉터리에서 돌려도 같은 곳에 쓴다.
+const outDir = process.argv[3] ?? path.join(REPO_ROOT, "public/assets/audio/bgm");
 
 if (!srcDir) {
   console.error("사용법: node scripts/process-bgm.mjs <원본폴더> [출력폴더]\n");
-  console.error("원본 파일(저장소에 없음 — 아래에서 받아 원본폴더에 넣으세요):");
-  for (const { source, title, url } of SLOTS) console.error(`  ${source}\n    ${title} — ${url}`);
+  printSourceList();
+  process.exit(1);
+}
+
+// 가공을 시작하기 전에 원본이 전부 있는지 확인한다 — 중간에 멈추면 출력 폴더에
+// 새 파일과 옛 파일이 섞여 어느 것이 최신인지 알 수 없게 된다.
+const missing = SLOTS.filter(({ source }) => !existsSync(path.join(srcDir, source)));
+if (missing.length > 0) {
+  console.error(`원본 ${missing.length}개를 찾지 못했습니다 (${path.resolve(srcDir)}):\n`);
+  for (const { source } of missing) console.error(`  없음: ${source}`);
+  console.error("");
+  printSourceList();
   process.exit(1);
 }
 

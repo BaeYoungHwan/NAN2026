@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { CSSProperties } from "react";
 import type { SfxCue } from "../audio/soundCues";
-import { ASSET_SOURCE_SITE, BGM_CREDITS, formatCredit } from "../content/credits";
+import { ASSET_SOURCE_SITE, BGM_CREDITS, LICENSE_URLS, formatCredit } from "../content/credits";
 
 export const GAME_TITLE = "돌려돌려 그림자";
 export const GAME_TAGLINE = "몸과 그림자를 따로 붙잡고 저승의 경계를 건너세요.";
@@ -43,10 +43,14 @@ function TitleScreen({ onStart, playSound }: TitleScreenProps) {
   };
 
   return (
-    <div style={screenStyle} onClick={handleClick}>
+    // 클릭 핸들러를 이 바깥 div에 걸면 안 된다 — 여기가 `overflowY: auto`로 스크롤되는
+    // 요소라, 스크롤바 트랙을 클릭해도 click 이벤트가 올라와 게임이 시작된다(실측:
+    // 560x480에서 스크롤바 폭 17px, 그 좌표의 elementFromPoint가 이 요소다). 하필
+    // 스크롤이 생기는 상황이 크레딧을 읽으려 내리는 순간이다.
+    <div style={screenStyle}>
       {/* 본문은 남는 공간을 모두 차지하며 그 안에서 가운데 정렬된다 — 크레딧을
           흐름 밖(absolute)에 두면 좁은 화면에서 줄 수가 늘어날 때 본문을 덮는다. */}
-      <div style={mainStyle}>
+      <div style={mainStyle} onClick={handleClick}>
         <h1 style={titleStyle}>{GAME_TITLE}</h1>
         <p style={taglineStyle}>{GAME_TAGLINE}</p>
 
@@ -72,9 +76,12 @@ function TitleScreen({ onStart, playSound }: TitleScreenProps) {
         <p style={startHintStyle}>Enter — 시작</p>
       </div>
 
-      {/* BGM 중 2곡이 CC-BY라 저작자 표시가 라이선스상 의무다 — 지울 수 없는 표기다. */}
+      {/* BGM 중 2곡이 CC-BY라 저작자 표시·변경 표시·라이선스 URI가 전부 라이선스상
+          의무다 — 지울 수 없는 표기다. 5곡 모두 루프·음량 가공을 거쳐 `편집됨`이 붙는다. */}
       <p style={creditStyle}>
         음악 — {BGM_CREDITS.map(formatCredit).join(" · ")} — {ASSET_SOURCE_SITE}
+        <br />
+        라이선스 전문: {LICENSE_URLS.join(" · ")}
       </p>
     </div>
   );
