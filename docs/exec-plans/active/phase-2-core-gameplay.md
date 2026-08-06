@@ -86,7 +86,10 @@
   - [x] (신규 발견) HUD 상단 안내 문구가 우측 상단 "재시작" 버튼에 가려짐 — §F "HUD 정리"에서 해소(조작 안내를 타이틀 화면·튜토리얼 대사로 이관하고 HUD는 라운드/사망만 좌상단 패널에 남김). **2026-08-06 라이브 반영 확인**
   - [x] (신규 발견) `favicon.ico` 미제공 — 404 2건. §F에서 `public/favicon.svg` 추가로 해소. **2026-08-06 라이브에서 리소스 37건 전부 200 확인 — 404 0건**
   - [x] **배포본 2차 최신화 (2026-08-06)** — PR #27(BGM 외부 음원) → `develop`, PR #26(심사 첫인상 개선 + 밸런스 파라미터 집약 + 리뷰 대응) → `main` 순으로 머지해 배포. 라이브 실측: 타이틀 화면·BGM 크레딧·HUD 정리 전부 반영, 오프닝 → 튜토리얼 → 1R 조작 → 안전구역 이탈 사망 판정 정상, 리소스 37건 전부 200, 콘솔 에러 0건
-    - **배포 함정(금요일 최종 배포 때 주의)**: `deploy-pages`의 `deploy` job이 `deployment_queued`에서 10분간 진행되지 않아 **타임아웃으로 2회 연속 실패**했다(빌드는 성공). `--failed` 재실행도 "Deployment cancelled"로 실패했고, `gh workflow run deploy-pages.yml --ref main`으로 **워크플로 전체를 새로 실행하니 성공**했다. GitHub Pages 인프라 지연으로 보이며 코드·설정 문제는 아니었다. 최종 배포는 마감 직전이 아니라 여유를 두고 돌린다
+    - **배포 함정 — push 트리거 실패가 반복된다(최종 배포 때 주의)**: `deploy-pages`의 `deploy` job이 `deployment_queued`에서 진행되지 않아 타임아웃으로 실패했고(빌드는 성공), `--failed` 재실행도 "Deployment cancelled"로 실패했다. `gh workflow run deploy-pages.yml --ref main`으로 **워크플로 전체를 새로 실행하니 성공**했다.
+      - **1회성 사고가 아니다.** 실행 이력상 같은 패턴이 두 번 있다 — 2026-07-28(push 01:27 실패 → dispatch 01:31 성공), 2026-08-06(push 13:44 실패 → dispatch 13:58 성공). 그 사이 2026-08-05 push 배포는 성공했으므로 항상 실패하는 것은 아니다
+      - 원인 미확인. 의심 지점은 워크플로의 `concurrency: { group: pages, cancel-in-progress: true }` — push 시 다른 실행과 겹치면 진행 중인 배포가 취소될 수 있다. 확인·수정은 마감 후 과제로 둔다(지금 워크플로를 건드리면 배포 자체가 위험해진다)
+      - **대응**: 최종 배포는 마감 직전이 아니라 여유를 두고 돌리고, push 배포가 실패하면 곧바로 `gh workflow run deploy-pages.yml --ref main`으로 재실행한 뒤 라이브를 실측 확인한다
 - [x] **PDF 변환 파이프라인 구축 (2026-08-06)** — `scripts/build-submission-pdf.mjs`. pandoc·wkhtmltopdf·puppeteer가 모두 없는 환경이라, 마크다운 → HTML(인쇄용 CSS) → Chrome `--headless --print-to-pdf`로 처리한다. 외부 의존성 0(`generate-audio.mjs`와 같은 기조). 마크다운 파서는 범용이 아니라 제출물 3종이 쓰는 문법만 다룬다 — 헤딩·인용·표·목록(체크박스)·코드블록·이미지·수평선. `KEEP_HTML=1`로 중간 HTML을 남겨 레이아웃을 브라우저로 확인할 수 있다. 출력은 `docs/submission/pdf/`
 - [x] **스크린샷 5컷 촬영 (2026-08-06)** — 타이틀 / 튜토리얼 대사 / 1R(가이드 있음) / 2R(가이드 없음) / 3R(디메리트 HUD). 2R·3R은 `?round=` 디버그 진입으로 찍었는데 이 파라미터는 프로덕션 빌드에서 무시되므로(PR #17 리뷰) dev 서버로 촬영했다 — 렌더 경로는 동일하다. 원본 4.43MB를 `scripts/optimize-screenshots.mjs`(폭 1100px·팔레트 PNG)로 1.01MB까지 줄였다. **허용 각도가 확정되면 1R 부채꼴 크기가 달라지므로 재촬영 필요**
 - [x] **플레이 영상 콘티·촬영 체크리스트 (2026-08-06)** — [`docs/ref/play-video-plan.md`](../../ref/play-video-plan.md). 55초 기준 7컷(타이틀 → 오프닝 2장 → 1R → **의도적 사망** → 2R → 3R 디메리트 → 결과 요약)과 촬영 전/중/업로드 체크리스트. 60초를 넘기면 1R·2R에서 줄이고 사망·디메리트 컷은 유지한다
@@ -95,6 +98,29 @@
 - [ ] AI활용기술문서 PDF — 양쪽 파트 작성 완료(PR #22), PDF 변환 완료. 남은 작업: 라이선스 확인(PR #27의 OpenGameArt BGM 5곡 포함)
 - [ ] 팀원 롤 기술서 PDF — 양쪽 파트 작성 완료, PDF 변환 완료. 남은 작업: 팀 검토 (`docs/product-specs/team-roles.md`는 원호 파트 미작성 상태였던 중복 초안이라 삭제함)
 - [x] 제출물 문서 3종을 `docs/product-specs/`에서 `docs/submission/`으로 통합 이동 (PR #23 리뷰 반영, 2026-08-05) — 기획/작업용 문서(PRD 등)와 제출용 최종본을 디렉터리로 분리. `CLAUDE.md` 프로젝트 구조 트리에도 반영
+
+### G. 이어서 할 일 (2026-08-07 저녁 기준)
+
+> 다음 세션은 여기서부터 시작한다.
+
+**대기 중인 두 갈래**
+
+1. **PR #28** (`develop → main`, 문서 전용) — 열려 있고 머지 대기. 게임 코드 변경은 없다(README 재구성, 팀원 롤 기술서 재작성, 서술 검증 6건 정정, 상호 리뷰 체계 명문화, AI 문서 오디오 파트, PDF 파이프라인·준비 문서). 로컬 검증은 끝났고(테스트 222개, `tsc -b`/`build` 클린) GitHub Actions CI는 큐 대기 중이었다
+2. **`origin/wonho` 브랜치** — 송원호가 2026-08-07에 올린 **미리뷰** 작업. **아직 PR이 없다.**
+   - `90647bf` 1R 안전 구역 가이드 부채꼴에 위험도 색 경고 추가
+   - `07b69a0` `CAUTION_MARGIN`/`DANGER_MARGIN`(PR #26에서 도입)을 재사용하도록 정리
+   - `GameCanvas.tsx` +62줄, 테스트 37줄. `develop`을 이미 머지해 둬(`f6c61f3`) 충돌 없이 들어올 수 있다
+
+**순서 (배포를 1회로 줄이기 위해 이 순서를 지킨다)**
+
+- [ ] `wonho` 브랜치 코드 리뷰 → PR 생성 → `develop` 머지
+- [ ] **1R 스크린샷 재촬영** — 부채꼴 색이 위험도에 따라 변하므로 `screenshots/03-round1-guide.png`가 실제 게임과 달라진다. 이 이미지는 README 히어로·라운드 표·게임소개 PDF 세 곳에 쓰인다
+- [ ] `node scripts/optimize-screenshots.mjs` → `node scripts/build-submission-pdf.mjs`
+- [ ] PR #28에 얹어 **한 번에** `main` 배포 (어제 배포가 큐 타임아웃으로 2회 실패했으므로 횟수를 줄인다)
+
+밸런스 확정(§A)까지 끝나면 스크린샷을 또 찍어야 하므로, 가능하면 플레이테스트를 먼저 하고 재촬영을 한 번으로 합치는 편이 낫다.
+
+---
 
 ## 검증 기준
 
