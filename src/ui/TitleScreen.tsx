@@ -44,32 +44,35 @@ function TitleScreen({ onStart, playSound }: TitleScreenProps) {
 
   return (
     <div style={screenStyle} onClick={handleClick}>
-      <h1 style={titleStyle}>{GAME_TITLE}</h1>
-      <p style={taglineStyle}>{GAME_TAGLINE}</p>
+      {/* 본문은 남는 공간을 모두 차지하며 그 안에서 가운데 정렬된다 — 크레딧을
+          흐름 밖(absolute)에 두면 좁은 화면에서 줄 수가 늘어날 때 본문을 덮는다. */}
+      <div style={mainStyle}>
+        <h1 style={titleStyle}>{GAME_TITLE}</h1>
+        <p style={taglineStyle}>{GAME_TAGLINE}</p>
 
-      <dl style={keyListStyle}>
-        <div style={keyRowStyle}>
-          <dt style={keyTermStyle}>W A S D</dt>
-          <dd style={keyDescStyle}>캐릭터 이동</dd>
-        </div>
-        <div style={keyRowStyle}>
-          <dt style={keyTermStyle}>, .</dt>
-          <dd style={keyDescStyle}>그림자 회전</dd>
-        </div>
-        <div style={keyRowStyle}>
-          <dt style={keyTermStyle}>M</dt>
-          <dd style={keyDescStyle}>소리 켜기 / 끄기</dd>
-        </div>
-      </dl>
+        <dl style={keyListStyle}>
+          <div style={keyRowStyle}>
+            <dt style={keyTermStyle}>W A S D</dt>
+            <dd style={keyDescStyle}>캐릭터 이동</dd>
+          </div>
+          <div style={keyRowStyle}>
+            <dt style={keyTermStyle}>, .</dt>
+            <dd style={keyDescStyle}>그림자 회전</dd>
+          </div>
+          <div style={keyRowStyle}>
+            <dt style={keyTermStyle}>M</dt>
+            <dd style={keyDescStyle}>소리 켜기 / 끄기</dd>
+          </div>
+        </dl>
 
-      <p style={ruleStyle}>
-        그림자가 <strong style={{ color: "#ffb057" }}>안전 구역</strong>(광원 반대편)을 벗어나는 순간 즉사합니다.
-      </p>
+        <p style={ruleStyle}>
+          그림자가 <strong style={{ color: "#ffb057" }}>안전 구역</strong>(광원 반대편)을 벗어나는 순간 즉사합니다.
+        </p>
 
-      <p style={startHintStyle}>Enter — 시작</p>
+        <p style={startHintStyle}>Enter — 시작</p>
+      </div>
 
-      {/* BGM 중 2곡이 CC-BY라 저작자 표시가 라이선스상 의무다 — 지울 수 없는 표기다.
-          화면 아래에 고정해 본문 레이아웃(가운데 정렬)에 영향을 주지 않는다. */}
+      {/* BGM 중 2곡이 CC-BY라 저작자 표시가 라이선스상 의무다 — 지울 수 없는 표기다. */}
       <p style={creditStyle}>
         음악 — {BGM_CREDITS.map(formatCredit).join(" · ")} — {ASSET_SOURCE_SITE}
       </p>
@@ -83,16 +86,32 @@ const screenStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
-  justifyContent: "center",
-  gap: 14,
   // 가로등 불빛이 위에서 내려오는 배경 아트와 톤을 맞춘다.
   background: "radial-gradient(ellipse at 50% 15%, #1c1830 0%, #07060c 75%)",
   color: "#e8e4f0",
   fontFamily: "var(--font-ui)",
   cursor: "pointer",
-  padding: 32,
+  padding: 24,
   textAlign: "center",
   lineHeight: 1.5,
+  // 화면이 아주 좁아 본문+크레딧이 다 안 들어가면 잘라내는 대신 스크롤되게 둔다.
+  overflowY: "auto",
+};
+
+/**
+ * 크레딧을 뺀 본문 — 남는 공간을 차지하고 그 안에서 가운데 정렬된다.
+ *
+ * `minHeight: 0`을 주면 안 된다. flex 아이템의 기본 `min-height: auto`가 "내용보다
+ * 작아지지 않는다"를 보장하는데, 이걸 풀면 화면이 좁을 때 본문이 찌그러지면서
+ * 내용이 아래(크레딧 자리)로 넘쳐 겹친다. 대신 부모의 `overflowY: auto`로 스크롤한다.
+ */
+const mainStyle: CSSProperties = {
+  flex: 1,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 14,
 };
 
 const titleStyle: CSSProperties = {
@@ -154,20 +173,21 @@ const startHintStyle: CSSProperties = {
 };
 
 /**
- * 크레딧 표기 — 화면 하단 고정. 좁은 화면에서도 잘리지 않도록 줄바꿈을 허용하고,
- * 본문보다 눈에 띄지 않게 낮은 대비로 둔다(읽을 수는 있어야 하므로 완전히
- * 흐리게 하지는 않는다 — 라이선스 의무 이행이 목적이다).
+ * 크레딧 표기 — 본문 아래 흐름에 배치한다(하단 고정이 아니다). 좁은 화면에서 줄 수가
+ * 늘어나면 본문이 그만큼 밀려날 뿐 겹치지 않는다.
+ *
+ * 색은 본문보다 낮은 대비로 두되 읽을 수는 있어야 한다 — 라이선스 의무 이행이
+ * 목적이므로, 배경(#07060c) 대비 약 5.4:1로 WCAG AA(4.5:1)를 넘긴다.
  */
 const creditStyle: CSSProperties = {
-  position: "absolute",
-  left: 16,
-  right: 16,
-  bottom: 10,
   margin: 0,
-  fontSize: 10,
+  paddingTop: 12,
+  maxWidth: 760,
+  fontSize: 11,
   lineHeight: 1.5,
-  color: "#6f6a80",
+  color: "#8a85a0",
   letterSpacing: "0.01em",
+  flexShrink: 0,
 };
 
 export default TitleScreen;

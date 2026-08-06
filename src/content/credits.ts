@@ -15,6 +15,18 @@ export interface AssetCredit {
   author: string;
   /** 표시용 라이선스 이름. CC0는 표기 의무가 없지만 구분을 위해 함께 적는다. */
   license: string;
+  /**
+   * 이 라이선스가 저작자 표시를 **요구하는지**. 화면 표기 누락을 막는 테스트의
+   * 판정 기준이라 반드시 정확해야 한다.
+   *
+   * `license` 문자열을 파싱해서(`startsWith("CC BY")` 같은 식으로) 판별하지 않는
+   * 이유: 표기 흔들림에 안전망이 통째로 걸린다. 실제로 `ASSET_SOURCES.md`는
+   * "CC-BY 3.0"(하이픈), 여기는 "CC BY 3.0"(공백)을 쓰는데, 누가 문서에 맞춰
+   * 하이픈으로 통일하는 순간 문자열 판별은 의무 대상을 하나도 못 찾고 조용히
+   * 통과한다. 곡을 추가할 때 이 필드를 채우며 라이선스를 한 번 더 확인하게 되는
+   * 효과도 있다.
+   */
+  requiresAttribution: boolean;
   /** 원본 페이지 — 화면에는 나가지 않고 출처 추적용이다. */
   url: string;
 }
@@ -25,30 +37,35 @@ export const BGM_CREDITS: readonly AssetCredit[] = [
     title: "Intro Music",
     author: "RonyDkid",
     license: "CC0",
+    requiresAttribution: false,
     url: "https://opengameart.org/content/intro-music-0",
   },
   {
     title: "Dark Theme",
     author: "JaggedStone",
     license: "CC0",
+    requiresAttribution: false,
     url: "https://opengameart.org/content/dark-theme",
   },
   {
     title: "Dark Shrine Loop",
     author: "qubodup",
     license: "CC0",
+    requiresAttribution: false,
     url: "https://opengameart.org/content/dark-shrine-loop",
   },
   {
     title: "Mystical Theme",
     author: "Alexandr Zhelanov",
     license: "CC BY 3.0",
+    requiresAttribution: true,
     url: "https://opengameart.org/content/mystical-theme",
   },
   {
     title: "Epilogue",
     author: "tcarisland",
     license: "CC BY 4.0",
+    requiresAttribution: true,
     url: "https://opengameart.org/content/epilogue",
   },
 ];
@@ -60,3 +77,8 @@ export const ASSET_SOURCE_SITE = "OpenGameArt.org";
 export function formatCredit(credit: AssetCredit): string {
   return `${credit.title} (${credit.author}, ${credit.license})`;
 }
+
+/** 저작자 표시가 의무인 항목만 — 화면 표기와 그 회귀 테스트가 이 목록을 기준으로 삼는다. */
+export const ATTRIBUTION_REQUIRED: readonly AssetCredit[] = BGM_CREDITS.filter(
+  (credit) => credit.requiresAttribution,
+);

@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import TitleScreen, { GAME_TITLE } from "./TitleScreen";
-import { BGM_CREDITS } from "../content/credits";
+import { ATTRIBUTION_REQUIRED } from "../content/credits";
 
 afterEach(cleanup);
 
@@ -60,16 +60,20 @@ describe("TitleScreen", () => {
 
   // BGM 5곡 중 2곡이 CC-BY라 저작자 표시가 **라이선스상 의무**다. 화면을 정리하다
   // 무심코 지우면 라이선스 위반이 되므로, 없어지면 실패하도록 못을 박아둔다.
-  it("CC-BY 곡의 저작자를 화면에 표시한다 — 라이선스 의무", () => {
+  it("표기 의무가 있는 곡의 제목·저작자·라이선스를 화면에 표시한다", () => {
     render(<TitleScreen onStart={() => {}} />);
 
-    const attributionRequired = BGM_CREDITS.filter((credit) => credit.license.startsWith("CC BY"));
-    // 표기 의무가 있는 곡이 하나도 안 잡히면 이 테스트가 통과해도 의미가 없다.
-    expect(attributionRequired.length).toBeGreaterThan(0);
+    // 의무 대상이 하나도 없으면 이 테스트는 통과해도 아무것도 검증하지 않는다.
+    expect(ATTRIBUTION_REQUIRED.length).toBeGreaterThan(0);
 
-    for (const credit of attributionRequired) {
-      expect(screen.getByText(new RegExp(credit.author))).toBeInTheDocument();
-      expect(screen.getByText(new RegExp(credit.title))).toBeInTheDocument();
+    // 크레딧은 <p> 하나에 통으로 들어가므로 텍스트를 직접 읽어 부분 문자열을 확인한다.
+    // getByText에 정규식을 넘기면 저작자명의 괄호·마침표가 패턴으로 해석되어(예:
+    // "Mr. X (aka Y)") 매칭이 어긋나거나 SyntaxError가 난다.
+    const credit = screen.getByText(/^음악 —/);
+    for (const { title, author, license } of ATTRIBUTION_REQUIRED) {
+      expect(credit).toHaveTextContent(title);
+      expect(credit).toHaveTextContent(author);
+      expect(credit).toHaveTextContent(license);
     }
   });
 });
