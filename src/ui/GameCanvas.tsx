@@ -15,7 +15,7 @@ import {
 } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
-import { naturalAngle, nearestLight } from "../shadow/shadowCaster";
+import { angleFromLight, naturalAngle, nearestLight } from "../shadow/shadowCaster";
 import { alignmentMargin } from "../shadow/containmentJudge";
 import { getTuning } from "../core/tuning";
 import {
@@ -561,11 +561,25 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         // (ADR-004). 유예 동안은 정렬이 깨져도 죽지 않는다.
         const currentActiveLight = nearestLight(stage.lightSources, characterRef.current);
         if (currentActiveLight.x !== activeLightRef.current.x || currentActiveLight.y !== activeLightRef.current.y) {
-          lightSwitchGraceRef.current = getTuning().lightSwitchGraceSeconds;
+          // 유예는 "직전 광원 기준으로는 정렬돼 있었는데 광원이 바뀌는 바람에
+          // 어긋난" 경우에만 준다. 조건 없이 매번 재장전하면 두 가로등의 수직
+          // 이등분선을 왔다 갔다 하는 것만으로 유예가 끝없이 갱신되어(전환은 몇
+          // 프레임마다 일어난다) 그림자 각도와 무관하게 영원히 죽지 않는다.
+          // 반대로 직전 광원 기준으로 이미 이탈 상태였다면 그건 광원 전환 탓이
+          // 아니라 원래 죽을 상태였던 것이므로 보호할 이유가 없다.
+          const previousTolerance = effectiveAngleTolerance(roundRef.current, getTuning().safeAngleTolerance);
+          const previousNatural = angleFromLight(activeLightRef.current, characterRef.current);
+          const wasAligned =
+            alignmentMargin(shadowAngleRef.current, previousNatural, previousTolerance) <= 1;
+
           activeLightRef.current = currentActiveLight;
-          // 요구 각도가 방금 크게 바뀌었고 잠시 무적이라는 것을 알린다 — 이 소리가
-          // 없으면 플레이어는 왜 갑자기 그림자를 크게 돌려야 하는지 알 수 없다.
-          audio?.play("lightSwitch");
+
+          if (wasAligned) {
+            lightSwitchGraceRef.current = getTuning().lightSwitchGraceSeconds;
+            // 요구 각도가 방금 크게 바뀌었고 잠시 무적이라는 것을 알린다 — 이 소리가
+            // 없으면 플레이어는 왜 갑자기 그림자를 크게 돌려야 하는지 알 수 없다.
+            audio?.play("lightSwitch");
+          }
         }
 
         // 이번 프레임에 세이브 포인트를 새로 밟았는지 — 활성화(래치)와, 그 프레임의

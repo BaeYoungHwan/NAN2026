@@ -247,18 +247,25 @@ describe("AudioEngine BGM", () => {
     expect(sources[0].stop).toHaveBeenCalled();
   });
 
-  it("컷신 곡은 루프하지 않고 라운드 곡은 루프한다", async () => {
+  it("엔딩만 한 번 재생하고 끝나며 나머지는 루프한다", async () => {
     stubFetch();
     const { context, sources } = fakeContext();
     const engine = new AudioEngine({ context: context as unknown as AudioContext, buffers: allBuffers() });
 
-    engine.playBgm("opening");
+    engine.playBgm("ending");
     await flush();
     engine.playBgm("round1");
     await flush();
+    engine.playBgm("opening");
+    await flush();
 
+    // 엔딩은 결과 요약 슬라이드에서 화면이 멈춘 채 유지되므로, 곡도 한 번 끝나고
+    // 조용해지는 편이 마무리로 자연스럽다.
     expect(sources[0].loop).toBe(false);
     expect(sources[1].loop).toBe(true);
+    // 오프닝은 타이틀 화면까지 함께 덮는데 플레이어가 거기 머무는 시간이 정해져
+    // 있지 않다 — 루프하지 않으면 곡이 끝난 뒤로 무음이 된다.
+    expect(sources[2].loop).toBe(true);
   });
 
   it("파일이 없어 디코딩이 실패해도 예외가 새어나오지 않는다", async () => {
