@@ -20,7 +20,7 @@ NHN 주최 **NAN2026 AI 게임 개발 해커톤** 사전과제 제출용 웹 게
 
 PDF는 `node scripts/build-submission-pdf.mjs`로 생성합니다 — 마크다운을 고치면 다시 돌리면 됩니다(외부 의존성 없이 Chrome의 인쇄 기능을 씁니다). 문서용 스크린샷은 `docs/submission/screenshots/`에 있고, 다시 찍은 뒤에는 `node scripts/optimize-screenshots.mjs`로 용량을 정리합니다.
 
-배포본은 2026-08-05에 `develop`의 최신 상태(오디오 시스템, 타일 텍스처, 세이브 포인트 접촉 판정 등 54커밋)로 갱신했습니다. 그 이후의 심사 첫인상 개선(타이틀 화면·HUD 정리·favicon·DPR 대응)과 BGM 외부 음원 교체는 아직 라이브에 반영되지 않았습니다 — PR #26(`develop → main`) 머지 시 함께 배포됩니다. PRD 미결 사항(그림자 길이·허용 각도·회전 속도·가로등 간격·3R 배율, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)을 플레이테스트로 확정하면 최종 밸런스로 한 번 더 갱신할 예정입니다.
+배포본은 2026-08-06에 갱신했습니다 — 심사 첫인상 개선(타이틀 화면·HUD 정리·favicon·DPR 대응)과 BGM 외부 음원 교체가 모두 반영돼 있습니다(라이브 실측: 리소스 37건 전부 200, 콘솔 에러 0건). PRD 미결 사항(그림자 길이·허용 각도·회전 속도·가로등 간격·3R 배율, [`docs/exec-plans/active/phase-2-core-gameplay.md`](docs/exec-plans/active/phase-2-core-gameplay.md) §A 참고)을 플레이테스트로 확정하면 최종 밸런스로 한 번 더 갱신할 예정입니다.
 
 ---
 
