@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getTuning,
   resetTuning,
@@ -95,6 +95,17 @@ function displayValue(spec: FieldSpec, tuning: Readonly<Tuning>): number {
   return spec.toDisplay ? spec.toDisplay(raw) : raw;
 }
 
+/**
+ * 재생성 요청을 모아 보내는 대기 시간(ms).
+ *
+ * `<input type="range">`의 onChange는 드래그하는 내내 값이 바뀔 때마다 발화한다 —
+ * 그대로 연결하면 슬라이더 하나를 끄는 동안 스테이지가 수십 번 다시 생성된다
+ * (PR #26 리뷰). 값 자체는 즉시 반영하고(그래야 슬라이더가 따라온다) 무거운
+ * 재생성만 마지막 변경 이후 이만큼 조용해졌을 때 한 번 실행한다. 200ms는 드래그를
+ * 멈춘 것을 사람이 "바로"라고 느끼는 범위이면서, 연속 입력을 묶기에는 충분하다.
+ */
+const REGENERATE_DEBOUNCE_MS = 200;
+
 interface TuningPanelProps {
   round: Round;
   deathCount: number;
@@ -127,6 +138,24 @@ function TuningPanel({ round, deathCount, onRegenerate }: TuningPanelProps) {
     return () => window.clearInterval(timer);
   }, [round]);
 
+  // 드래그가 멈춘 뒤 한 번만 재생성한다 — REGENERATE_DEBOUNCE_MS 주석 참고.
+  const regenerateTimerRef = useRef<number | null>(null);
+  const scheduleRegenerate = useCallback(() => {
+    if (regenerateTimerRef.current !== null) window.clearTimeout(regenerateTimerRef.current);
+    regenerateTimerRef.current = window.setTimeout(() => {
+      regenerateTimerRef.current = null;
+      onRegenerate();
+    }, REGENERATE_DEBOUNCE_MS);
+  }, [onRegenerate]);
+
+  // 언마운트 시점에 예약된 재생성이 남아 사라진 패널이 스테이지를 갈아엎지 않게 한다.
+  useEffect(
+    () => () => {
+      if (regenerateTimerRef.current !== null) window.clearTimeout(regenerateTimerRef.current);
+    },
+    [],
+  );
+
   const tuning = getTuning();
   const overrides = tuningOverrides();
   const changedKeys = Object.keys(overrides) as (keyof Tuning)[];
@@ -135,13 +164,15 @@ function TuningPanel({ round, deathCount, onRegenerate }: TuningPanelProps) {
     const internal = spec.fromDisplay ? spec.fromDisplay(displayed) : displayed;
     setTuningOverride(spec.key, internal);
     setRevision((n) => n + 1);
-    if (spec.needsRegenerate) onRegenerate();
+    if (spec.needsRegenerate) scheduleRegenerate();
   };
 
   const handleReset = () => {
     resetTuning();
     setRevision((n) => n + 1);
-    onRegenerate();
+    // 버튼은 한 번만 눌리므로 디바운스가 필요 없지만, 직전 드래그가 예약해 둔
+    // 재생성이 기본값 복원 뒤에 또 도는 것을 막기 위해 같은 경로로 보낸다.
+    scheduleRegenerate();
   };
 
   if (collapsed) {

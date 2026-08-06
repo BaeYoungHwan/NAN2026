@@ -44,6 +44,12 @@ function App() {
   const [clearElapsedMs, setClearElapsedMs] = useState<number | null>(null);
   const playStartedAtRef = useRef<number | null>(null);
   const gameCanvasRef = useRef<GameCanvasHandle>(null);
+  // 캔버스 크기 계산에 쓰는 레이아웃 요소들 — 이 구조를 렌더하는 쪽이 App이므로
+  // GameCanvas가 클래스명으로 DOM을 거슬러 올라가지 않고 ref로 직접 받게 한다
+  // (`ui/GameCanvas.tsx`의 `ElementRef` 주석 참고).
+  const stageAreaRef = useRef<HTMLDivElement>(null);
+  const stageFrameRef = useRef<HTMLDivElement>(null);
+  const stageElementRef = useRef<HTMLDivElement>(null);
   const audio = useAudio();
   const { engineRef: audioEngineRef, muted, toggleMute, play, playBgm, ready: audioReady } = audio;
 
@@ -119,6 +125,19 @@ function App() {
     gameCanvasRef.current?.restart();
   }, [play]);
 
+  /**
+   * 개발용 튜닝 패널이 "스테이지 재생성이 필요한 값"을 바꿨을 때의 처리 —
+   * **현재 라운드를 유지한 채** 그 라운드 스테이지만 새 파라미터로 다시 만든다.
+   *
+   * 예전에는 이 자리에 `handleRestart`를 그대로 연결해서, 3R에서 맵 크기를 건드리는
+   * 순간 1R로 튕겨 나가 3R 전용 파라미터(허용각 배율 등)를 볼 수 없었다 — 패널을
+   * 만든 목적 자체가 무력화되는 문제였다(PR #26 리뷰). 재시작 효과음도 내지 않는다:
+   * 슬라이더 조작은 UI 클릭이 아니고, 반복해서 나면 시끄럽기만 하다.
+   */
+  const handleTuningRegenerate = useCallback(() => {
+    gameCanvasRef.current?.regenerate();
+  }, []);
+
   /** 엔딩 슬라이드 뒤에 결과 요약 한 장을 덧붙인다 — `buildClearSummary` 참고. */
   const endingSlides = useMemo(
     () => [...ENDING_SLIDES, buildClearSummary(deathCount, clearElapsedMs)],
@@ -139,11 +158,14 @@ function App() {
           시각적 테두리인 .stage-frame은 콘텐츠를 감싸므로(margin: auto) 폭이 .stage를
           따라가는데, 그걸 재면 "프레임 폭 ← 스테이지 폭 ← 프레임 폭" 순환이 되어
           창을 넓혀도 캔버스가 커지지 않는다(실측 확인). */}
-      <div className="stage-area">
-        <div className="stage-frame">
-          <div className="stage">
+      <div className="stage-area" ref={stageAreaRef}>
+        <div className="stage-frame" ref={stageFrameRef}>
+          <div className="stage" ref={stageElementRef}>
             <GameCanvas
               ref={gameCanvasRef}
+              stageAreaRef={stageAreaRef}
+              stageFrameRef={stageFrameRef}
+              stageElementRef={stageElementRef}
               onDeathCountChange={handleDeathCountChange}
               onRoundChange={handleRoundChange}
               inputDisabled={dialogueQueue.length > 0 || showTitle || showOpening || showEnding}
@@ -178,11 +200,12 @@ function App() {
         NHN NAN2026 AI 게임 개발 해커톤 사전과제 — 키보드 전용
       </p>
 
-      {/* 개발 전용 — 스테이지 재생성이 필요한 값을 바꾸면 재시작으로 새 스테이지를 만든다.
-          지연 로드라 Suspense가 필요한데, 로딩 중 보여줄 것이 없으므로 fallback은 null이다. */}
+      {/* 개발 전용 — 스테이지 재생성이 필요한 값을 바꾸면 현재 라운드 그대로 새
+          스테이지를 만든다(handleTuningRegenerate 참고). 지연 로드라 Suspense가
+          필요한데, 로딩 중 보여줄 것이 없으므로 fallback은 null이다. */}
       {tuningEnabled && (
         <Suspense fallback={null}>
-          <TuningPanel round={round} deathCount={deathCount} onRegenerate={handleRestart} />
+          <TuningPanel round={round} deathCount={deathCount} onRegenerate={handleTuningRegenerate} />
         </Suspense>
       )}
     </div>

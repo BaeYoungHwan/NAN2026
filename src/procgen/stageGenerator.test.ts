@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Round } from "../core/round";
+import { resetTuning, setTuningOverride } from "../core/tuning";
 import { bfsDistances, isReachable } from "./reachability";
 import { DEFAULT_SEED, generateStage, seedForRound } from "./stageGenerator";
 
@@ -75,6 +76,25 @@ describe("generateStage", () => {
     expect(stage.lightSources.length).toBeGreaterThan(0);
     for (const light of stage.lightSources) {
       expect(isWalkable(stage, light)).toBe(false);
+    }
+  });
+
+  // 광원이 0개면 `nearestLight`가 던지고 게임 루프(rAF)가 그 자리에서 죽는다.
+  // 통로가 넓으면(튜닝 패널에서 corridorWidth를 4까지 올릴 수 있다) 경로의 모든
+  // 셀이 벽 탐색 반경(2칸) 밖으로 밀려나 실제로 0개가 나왔다 — 실측으로 400시드 중
+  // 7개. 폴백(그리드 전역 최근접 벽 탐색)이 이 구멍을 막는지 넓은 통로에서 확인한다.
+  it("통로가 넓어도 광원이 반드시 1개 이상 생기고, 여전히 벽 위에 있다", () => {
+    setTuningOverride("corridorWidth", 4);
+    try {
+      for (let seed = 1; seed <= 400; seed++) {
+        const stage = generateStage(seed);
+        expect(stage.lightSources.length).toBeGreaterThan(0);
+        for (const light of stage.lightSources) {
+          expect(isWalkable(stage, light)).toBe(false);
+        }
+      }
+    } finally {
+      resetTuning();
     }
   });
 

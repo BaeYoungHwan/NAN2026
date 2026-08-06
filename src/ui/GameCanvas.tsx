@@ -15,7 +15,7 @@ import {
 } from "../core/round";
 import { CHARACTER_RADIUS, moveCharacter, reverseMoveInput } from "../physics/character";
 import { createGridCollider } from "../physics/collider";
-import { naturalAngle, nearestLight } from "../shadow/shadowCaster";
+import { angleFromLight, naturalAngle, nearestLight } from "../shadow/shadowCaster";
 import { alignmentMargin } from "../shadow/containmentJudge";
 import { getTuning } from "../core/tuning";
 import {
@@ -43,9 +43,11 @@ import {
  * 1R 안전 구역 가이드(부채꼴)의 반지름 — 그림자 길이보다 조금 크게 그려 그림자
  * 끝이 부채꼴 안에 들어오게 한다. 그림자 길이가 튜닝 대상이라 상수가 아니라
  * 함수다(모듈 로드 시점에 계산해 두면 튜닝 패널로 길이를 바꿔도 부채꼴만 옛 크기로 남는다).
+ * 길이는 게임 루프가 그 프레임에 읽은 값을 그대로 받는다 — 렌더 함수들이 각자
+ * `getTuning()`을 부르지 않게 하기 위함이다(PR #26 리뷰).
  */
-function safeZoneRadius(): number {
-  return getTuning().shadowLength + 20;
+function safeZoneRadius(shadowLength: number): number {
+  return shadowLength + 20;
 }
 // 광원(가로등) 불빛 색 — hex 하나로만 두고 rgb 문자열(그라디언트용)은
 // hexToRgbString으로 파생시킨다. 예전엔 이 색을 hex/rgb 리터럴로 여러 곳에
@@ -78,6 +80,17 @@ const MAX_RENDER_SCALE = 2;
 const MIN_RENDER_SCALE = 0.25;
 
 /**
+ * `.stage`에 써넣는 CSS 폭의 하한(px) — 백킹 스토어 배율 하한과 같은 지점이다.
+ *
+ * 창을 극단적으로 좁히면 `fit`이 0에 가까워져 `Math.floor` 결과가 0px까지 떨어지는데,
+ * 백킹 스토어 쪽은 `MIN_RENDER_SCALE`에서 멈추므로 "CSS 폭은 0인데 실제 픽셀은
+ * 200×150"인 어긋난 상태가 된다(PR #26 리뷰). CSS 폭에도 같은 하한을 걸어 둘이 항상
+ * 같은 배율을 가리키게 한다 — 그보다 좁은 창에서는 캔버스가 넘쳐 잘리지만, 어차피
+ * 플레이가 불가능한 크기이므로 상태가 어긋나는 쪽보다 낫다.
+ */
+const MIN_STAGE_CSS_WIDTH = CANVAS_WIDTH * MIN_RENDER_SCALE;
+
+/**
  * 실제로 그릴 백킹 스토어 배율 — 캔버스가 화면에서 차지하는 CSS 폭과 논리 폭
  * (`CANVAS_WIDTH`)의 비에 기기 픽셀비를 곱한 값. 1이면 예전과 완전히 동일하다.
  *
@@ -100,6 +113,18 @@ function clamp(value: number, min: number, max: number): number {
 const DEATH_FRAMES: readonly Exclude<BodyPose, "walk">[] = ["death1", "death2", "death3", "death4"];
 
 /**
+ * 위험도(alignmentMargin) 구간 경계 — 몸 포즈·그림자 표정·이동 중 떨림이 **모두**
+ * 이 두 값을 공유한다. 예전에는 같은 숫자가 네 군데에 흩어져 있어(포즈 2곳, 표정
+ * 2곳, 떨림 계산 1곳) 한 곳만 조정하면 몸과 그림자가 서로 다른 지점에서 반응하는
+ * 상태로 조용히 어긋났다(PR #26 리뷰).
+ *
+ * margin은 0(자연각과 완전 일치)~1(허용 각도 경계)로 정규화된 값이라 1을 넘으면
+ * 이탈=사망이다 — 즉 아래 두 값은 "경계까지 얼마나 남았는가"의 비율이다.
+ */
+const CAUTION_MARGIN = 0.6;
+const DANGER_MARGIN = 0.85;
+
+/**
  * 위험도(alignmentMargin)에 따라 몸 포즈를 고른다 — 값이 클수록(경계에 가까울수록)
  * 더 위험한 포즈. 이동 중일 때는 위험도와 무관하게 항상 walk를 우선한다 — danger/
  * flinch로 강제 전환하면 걷는 도중 정지 포즈로 뚝 끊겨 보이는 문제가 있었다.
@@ -108,8 +133,8 @@ const DEATH_FRAMES: readonly Exclude<BodyPose, "walk">[] = ["death1", "death2", 
  */
 export function selectBodyPose(margin: number, isMoving: boolean): BodyPose {
   if (isMoving) return "walk";
-  if (margin >= 0.85) return "danger";
-  if (margin >= 0.6) return "flinch";
+  if (margin >= DANGER_MARGIN) return "danger";
+  if (margin >= CAUTION_MARGIN) return "flinch";
   return "idle";
 }
 
@@ -119,8 +144,8 @@ export function selectBodyPose(margin: number, isMoving: boolean): BodyPose {
  * annoyed/disappointed/delighted 3종은 이번 구현에서는 트리거가 없어 비워둔다(추후 확장 여지).
  */
 export function selectShadowExpression(margin: number): ShadowExpression {
-  if (margin >= 0.85) return "scared";
-  if (margin >= 0.6) return "surprised";
+  if (margin >= DANGER_MARGIN) return "scared";
+  if (margin >= CAUTION_MARGIN) return "surprised";
   return "normal";
 }
 
@@ -211,7 +236,7 @@ export function roundFadeAlpha(startedAt: number | null, now: number): number {
 
 /** 사망 시퀀스 경과 시간(ms)으로 죽음 모션의 현재/다음 프레임과 크로스페이드 비율을 계산한다. */
 export function deathFrameInfo(elapsedMs: number, totalMs: number, time: number): DeathFrameInfo {
-  const t = Math.min(1, elapsedMs / totalMs);
+  const t = clamp(elapsedMs / totalMs, 0, 1);
   let phase = DEATH_FRAMES.length - 1;
   for (let i = 0; i < DEATH_FRAMES.length; i++) {
     if (t < DEATH_PHASE_BOUNDARIES[i + 1]) {
@@ -250,7 +275,7 @@ export function deathFrameInfo(elapsedMs: number, totalMs: number, time: number)
   const soulBob = Math.sin(time / 480) * 3 * soulEnvelope;
 
   // 쓰러진 직후부터 서서히 화면을 어둡게 해 생명이 빠져나가는 분위기를 더한다.
-  const vignette = Math.min(1, Math.max(0, (t - phase0End) / (1 - phase0End))) * 0.35;
+  const vignette = clamp((t - phase0End) / (1 - phase0End), 0, 1) * 0.35;
 
   return {
     current: DEATH_FRAMES[phase],
@@ -268,9 +293,34 @@ export function deathFrameInfo(elapsedMs: number, totalMs: number, time: number)
 export interface GameCanvasHandle {
   /** 캐릭터·그림자 각도·라운드·세이브 포인트를 스폰/1R 상태로 되돌린다 (사망 카운트는 건드리지 않는 수동 재시작용). */
   restart: () => void;
+  /**
+   * **현재 라운드**를 유지한 채 그 라운드의 스테이지만 새 튜닝값으로 다시 만든다 —
+   * 개발용 튜닝 패널에서 맵 크기·통로 폭처럼 생성 시점에만 읽히는 값을 바꿨을 때 쓴다.
+   * 라운드를 1R로 되돌리지 않는 것이 `restart`와의 유일한 차이다(PR #26 리뷰 — 3R
+   * 전용 파라미터를 3R에서 관찰하며 조정할 수 있어야 한다).
+   */
+  regenerate: () => void;
 }
 
+/**
+ * 캔버스 크기 계산에 필요한 바깥 레이아웃 요소의 ref 묶음.
+ *
+ * 이 세 엘리먼트는 GameCanvas가 아니라 App이 렌더하므로(`.stage-area` > `.stage-frame`
+ * > `.stage` > canvas) ref로 명시적으로 건네받는다 — 예전에는 `closest(".stage-frame")`로
+ * 클래스명을 통해 거슬러 올라갔는데, 클래스명이 바뀌면 타입 검사에도 테스트에도 걸리지
+ * 않고 캔버스 크기 계산만 조용히 멈춘다(PR #26 리뷰).
+ *
+ * React 버전에 따라 `RefObject`의 nullable 표기가 달라지므로 구조적 타입으로 받는다.
+ */
+type ElementRef = { readonly current: HTMLElement | null };
+
 interface GameCanvasProps {
+  /** 크기 측정 기준 — 헤더·푸터를 뺀 남는 공간(`.stage-area`). */
+  stageAreaRef: ElementRef;
+  /** 테두리·패딩이 잡아먹는 몫을 실측할 프레임(`.stage-frame`). */
+  stageFrameRef: ElementRef;
+  /** 실제 px 폭을 써넣을 요소(`.stage`) — 캔버스의 부모. 내부 `stageRef`(스테이지 데이터)와 구분해 이름을 붙였다. */
+  stageElementRef: ElementRef;
   /** 사망(정렬 이탈) 이벤트가 발생할 때만 호출된다 — 매 프레임 호출되지 않음. */
   onDeathCountChange?: (count: number) => void;
   /** 라운드가 바뀔 때만 호출된다(골 도달로 1R→2R→3R 진행 시) — 매 프레임 호출되지 않음. stageCleared는 3R 골 도달(스테이지 전체 클리어) 여부. */
@@ -312,7 +362,15 @@ interface GameCanvasProps {
  * 둘 이유가 없다.
  */
 const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCanvas(
-  { onDeathCountChange, onRoundChange, inputDisabled = false, audioEngineRef },
+  {
+    stageAreaRef,
+    stageFrameRef,
+    stageElementRef,
+    onDeathCountChange,
+    onRoundChange,
+    inputDisabled = false,
+    audioEngineRef,
+  },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -414,13 +472,15 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
    * - 창 크기가 그대로여도 레이아웃 변화(헤더 표시/숨김 등)까지 잡아낸다.
    * - 관측 대상은 `.stage`도 `.stage-frame`도 아닌 `.stage-area`다. 앞의 둘은 크기가
    *   `.stage`를 따라가므로(우리가 정하는 값) 관측 → 대입 → 재관측 순환이 된다.
+   *
+   * 대상 엘리먼트는 App이 ref로 넘겨준다 — `ElementRef` 주석 참고.
    */
   useEffect(() => {
     const canvas = canvasRef.current;
-    const stage = canvas?.parentElement;
     // App이 렌더하는 바깥 구조: .stage-area(측정용) > .stage-frame(테두리) > .stage
-    const frame = canvas?.closest<HTMLElement>(".stage-frame");
-    const area = frame?.parentElement;
+    const stage = stageElementRef.current;
+    const frame = stageFrameRef.current;
+    const area = stageAreaRef.current;
     if (!canvas || !stage || !frame || !area) return;
 
     const boxOf = (el: HTMLElement) => {
@@ -446,7 +506,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // 가로·세로 중 더 빡빡한 쪽에 맞춰 4:3을 유지한다(확대는 하지 않는다 —
       // 논리 해상도보다 키우면 스프라이트가 뭉개진다).
       const fit = Math.min(availableWidth / CANVAS_WIDTH, availableHeight / CANVAS_HEIGHT, 1);
-      const cssWidth = Math.floor(CANVAS_WIDTH * fit);
+      // 하한을 두는 이유는 MIN_STAGE_CSS_WIDTH 주석 참고 — 백킹 스토어 배율과 짝이 맞아야 한다.
+      const cssWidth = Math.max(MIN_STAGE_CSS_WIDTH, Math.floor(CANVAS_WIDTH * fit));
       // 폭만 정한다 — 높이는 `.stage`의 `aspect-ratio`가 서브픽셀까지 정확히 파생한다
       // (양쪽을 각각 내림하면 비율이 0.1%쯤 어긋난다).
       stage.style.width = `${cssWidth}px`;
@@ -485,7 +546,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       observer.disconnect();
       dprQuery?.removeEventListener("change", onDprChange);
     };
-  }, []);
+  }, [stageAreaRef, stageFrameRef, stageElementRef]);
 
   // 새 스테이지를 로드할 때 재설정해야 하는 상태를 한곳에 모은다 — 수동 재시작(1R부터)과
   // 라운드 전환(다음 라운드 스테이지로) 양쪽이 공유한다.
@@ -519,6 +580,15 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         onRoundChange?.(1, false);
         clearedRef.current = false;
       },
+      // 라운드는 그대로 두고 그 라운드의 스테이지만 다시 만든다 — 시드는 라운드에서
+      // 파생되므로 같은 시드지만, 생성 파라미터(맵 크기·통로 폭 등)가 바뀌었으면
+      // 다른 지형이 나온다. `onRoundChange`는 호출하지 않는다 — 라운드가 바뀌지
+      // 않았으므로 App의 대사·엔딩 처리를 건드리면 안 된다.
+      regenerate: () => {
+        loadStage(generateStage(seedForRound(DEFAULT_SEED, roundRef.current)));
+        // 전체 클리어 상태에서 새 스테이지를 만들었으면 다시 조작할 수 있어야 한다.
+        clearedRef.current = false;
+      },
     }),
     [onRoundChange],
   );
@@ -545,6 +615,11 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       // 아래 두 값은 실제 이동 처리가 일어나는 분기 안에서만 갱신한다.
       let isMoving = false;
       const audio = audioEngineRef?.current ?? null;
+      // 프레임 중간에 값이 바뀔 수 없으므로(튜닝 오버라이드는 이벤트 핸들러에서만
+      // 걸린다) 한 번만 읽어 프레임 전체가 같은 값을 쓰게 한다 — 회전·판정·렌더가
+      // 각자 getTuning()을 부르면 호출이 늘 뿐 아니라, 한 프레임 안에서 서로 다른
+      // 값을 볼 여지도 남는다(PR #26 리뷰).
+      const tuning = getTuning();
 
       if (dyingRef.current) {
         if (time - deathAnimStartRef.current >= DEATH_ANIM_MS) {
@@ -594,10 +669,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         }
 
         if (inputRef.current.rotateCW) {
-          shadowAngleRef.current += getTuning().rotationSpeed * deltaSeconds;
+          shadowAngleRef.current += tuning.rotationSpeed * deltaSeconds;
         }
         if (inputRef.current.rotateCCW) {
-          shadowAngleRef.current -= getTuning().rotationSpeed * deltaSeconds;
+          shadowAngleRef.current -= tuning.rotationSpeed * deltaSeconds;
         }
         // 회전하는 동안만 이어지는 루프음. 엔진이 중복 호출을 무시하므로 매 프레임 불러도 된다.
         if (inputRef.current.rotateCW || inputRef.current.rotateCCW) {
@@ -612,11 +687,25 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         // (ADR-004). 유예 동안은 정렬이 깨져도 죽지 않는다.
         const currentActiveLight = nearestLight(stage.lightSources, characterRef.current);
         if (currentActiveLight.x !== activeLightRef.current.x || currentActiveLight.y !== activeLightRef.current.y) {
-          lightSwitchGraceRef.current = getTuning().lightSwitchGraceSeconds;
+          // 유예는 "직전 광원 기준으로는 정렬돼 있었는데 광원이 바뀌는 바람에
+          // 어긋난" 경우에만 준다. 조건 없이 매번 재장전하면 두 가로등의 수직
+          // 이등분선을 왔다 갔다 하는 것만으로 유예가 끝없이 갱신되어(전환은 몇
+          // 프레임마다 일어난다) 그림자 각도와 무관하게 영원히 죽지 않는다.
+          // 반대로 직전 광원 기준으로 이미 이탈 상태였다면 그건 광원 전환 탓이
+          // 아니라 원래 죽을 상태였던 것이므로 보호할 이유가 없다.
+          const previousTolerance = effectiveAngleTolerance(roundRef.current, tuning.safeAngleTolerance);
+          const previousNatural = angleFromLight(activeLightRef.current, characterRef.current);
+          const wasAligned =
+            alignmentMargin(shadowAngleRef.current, previousNatural, previousTolerance) <= 1;
+
           activeLightRef.current = currentActiveLight;
-          // 요구 각도가 방금 크게 바뀌었고 잠시 무적이라는 것을 알린다 — 이 소리가
-          // 없으면 플레이어는 왜 갑자기 그림자를 크게 돌려야 하는지 알 수 없다.
-          audio?.play("lightSwitch");
+
+          if (wasAligned) {
+            lightSwitchGraceRef.current = tuning.lightSwitchGraceSeconds;
+            // 요구 각도가 방금 크게 바뀌었고 잠시 무적이라는 것을 알린다 — 이 소리가
+            // 없으면 플레이어는 왜 갑자기 그림자를 크게 돌려야 하는지 알 수 없다.
+            audio?.play("lightSwitch");
+          }
         }
 
         // 이번 프레임에 세이브 포인트를 새로 밟았는지 — 활성화(래치)와, 그 프레임의
@@ -667,7 +756,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
           }
           // justReachedSavePoint만 true인 경우는 라운드 변화 없이 이번 프레임 정렬 판정만 스킵한다.
         } else {
-          const tolerance = effectiveAngleTolerance(roundRef.current, getTuning().safeAngleTolerance);
+          const tolerance = effectiveAngleTolerance(roundRef.current, tuning.safeAngleTolerance);
           const natural = naturalAngle(stage.lightSources, characterRef.current);
           const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
 
@@ -689,7 +778,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
       }
 
       // 렌더용 위험도/포즈 — 사망 리셋 등으로 위치가 막 바뀌었을 수 있어 매 프레임 다시 계산한다.
-      const tolerance = effectiveAngleTolerance(roundRef.current, getTuning().safeAngleTolerance);
+      const tolerance = effectiveAngleTolerance(roundRef.current, tuning.safeAngleTolerance);
       const natural = naturalAngle(stage.lightSources, characterRef.current);
       const margin = alignmentMargin(shadowAngleRef.current, natural, tolerance);
       // 게임플레이가 진행 중이 아니면(사망 연출·클리어·대사창 표시 중) 회전 루프음을 끈다 —
@@ -725,6 +814,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function GameCa
         margin,
         tolerance,
         natural,
+        shadowLength: tuning.shadowLength,
         time,
         facingRight: facingRightRef.current,
       });
@@ -790,6 +880,8 @@ interface RenderState {
   margin: number;
   tolerance: number;
   natural: number;
+  /** 이 프레임에 적용할 그림자 길이(px) — 게임 루프가 읽은 튜닝값을 그대로 내려받는다. */
+  shadowLength: number;
   /** requestAnimationFrame의 timestamp(ms) — 절차적 모션(숨쉬기·걷기 흔들림)의 위상 계산용. */
   time: number;
   /** 마지막 수평 이동 방향(오른쪽=true) — 스프라이트 좌우 반전에 쓴다. */
@@ -866,8 +958,9 @@ function drawWalkSprite(
   const isLeftStep = Math.floor(time / WALK_FRAME_MS) % 2 === 0;
   const legsImg = isLeftStep ? legs : legsMirrored;
   const bounce = Math.abs(Math.sin(time / 90)) * 6;
-  // 0(안전)~1(경계)은 떨림 없음, 그 이상(이탈 근접)부터 서서히 떨림이 붙는다.
-  const danger = clamp((margin - 0.6) / 0.4, 0, 1);
+  // 주의 구간(CAUTION_MARGIN)에 들어서기 전까지는 떨림이 없고, 거기서부터 경계(margin=1)
+  // 까지 선형으로 최대 떨림에 도달한다 — 정지 포즈가 flinch로 바뀌는 지점과 정확히 같다.
+  const danger = clamp((margin - CAUTION_MARGIN) / (1 - CAUTION_MARGIN), 0, 1);
   const jitterX = danger * Math.sin(time / 35) * 3;
 
   // 상체·다리가 같은 원본 시트에서 나온 크롭이라, 공통 기준 높이(200px =
@@ -989,12 +1082,13 @@ function drawShadowSprite(
   shadowAngle: number,
   aligned: boolean,
   time: number,
+  shadowLength: number,
 ) {
   const pulse = 1 + Math.sin(time / 300) * 0.04;
   const scale = BODY_DISPLAY_HEIGHT / img.naturalHeight;
   const w = img.naturalWidth * scale;
   const h = img.naturalHeight * scale;
-  const stretch = (getTuning().shadowLength / h) * pulse;
+  const stretch = (shadowLength / h) * pulse;
   // 전단 변환만 거치면 실루엣이 딱딱한 판때기(사다리꼴) 윤곽으로 보인다는
   // 피드백 — 가장자리를 블러로 부드럽게 풀어 윤곽선을 흐릿하게 만들고,
   // 완전한 검정에 가깝게 어둡혀 그림자다운 무게감을 준다.
@@ -1034,6 +1128,7 @@ function renderFrame(
     margin,
     tolerance,
     natural,
+    shadowLength,
     time,
     facingRight,
   } = state;
@@ -1083,7 +1178,7 @@ function renderFrame(
     const wedgeColor = safeZoneWedgeColor(margin);
     ctx.beginPath();
     ctx.moveTo(characterPos.x, characterPos.y);
-    ctx.arc(characterPos.x, characterPos.y, safeZoneRadius(), natural - tolerance, natural + tolerance);
+    ctx.arc(characterPos.x, characterPos.y, safeZoneRadius(shadowLength), natural - tolerance, natural + tolerance);
     ctx.closePath();
     ctx.fillStyle = wedgeColor.fill;
     ctx.fill();
@@ -1204,7 +1299,16 @@ function renderFrame(
 
   // 그림자 — 죽음 시퀀스 중에는 그리지 않는다(몸만 죽음 모션으로 표시)
   if (!dying) {
-    drawShadowSprite(ctx, sprites.shadow[shadowExpression], characterPos.x, characterPos.y, shadowAngle, aligned, time);
+    drawShadowSprite(
+      ctx,
+      sprites.shadow[shadowExpression],
+      characterPos.x,
+      characterPos.y,
+      shadowAngle,
+      aligned,
+      time,
+      shadowLength,
+    );
   }
 
   // 캐릭터 — 사망 시퀀스 중에는 현재/다음 죽음 프레임을 크로스페이드한다.
