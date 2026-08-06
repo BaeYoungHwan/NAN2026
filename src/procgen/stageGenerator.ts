@@ -341,8 +341,6 @@ function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
   // 경로 전체를 순회하며 벽 셀을 찾을 때까지 재시도한다 — walkable 셀을 광원
   // 좌표로 대체하는 예외는 두지 않는다. "광원은 항상 벽 위에 있다"는
   // 불변조건(stageGenerator.test.ts로 고정됨)을 이 폴백도 반드시 지켜야 한다.
-  // 통로 폭 2칸은 20x15 그리드에서 항상 벽에 둘러싸이므로(시드 1~2000 검증됨)
-  // 이 루프가 실패하는 경우는 실질적으로 없다.
   if (sources.length === 0) {
     for (const cell of path) {
       addNearWall(cell);
@@ -350,7 +348,43 @@ function placeLightSources(grid: TileGrid, path: Cell[]): Point[] {
     }
   }
 
+  // 그래도 못 찾았으면 탐색 반경을 아예 풀고 그리드 전체에서 가장 가까운 벽 셀을
+  // 고른다. `WALL_SEARCH_OFFSETS`는 최대 2칸까지만 보기 때문에, 통로 폭이 넓으면
+  // (튜닝 패널에서 corridorWidth를 4까지 올릴 수 있다) 경로의 모든 셀이 벽에서
+  // 2칸 넘게 떨어져 광원이 **하나도** 배치되지 않는다 — 실측으로 corridorWidth 4에서
+  // 400시드 중 7개가 여기 걸렸고, 그 스테이지는 첫 프레임에 `nearestLight`가 터지며
+  // 게임 루프가 죽었다. 그리드는 전부 벽인 상태에서 통로를 파낸 것이라 남은 벽이
+  // 반드시 있고, 이 전역 스캔은 광원이 0개인 스테이지에서만(드묾) 한 번 돈다.
+  if (sources.length === 0) {
+    const anchor = path[Math.floor(path.length / 2)];
+    const wallCell = nearestWallCellInGrid(grid, anchor);
+    if (wallCell) {
+      sources.push(cellCenter(grid.tileSize, wallCell.col, wallCell.row));
+    }
+  }
+
   return sources;
+}
+
+/** 그리드 전체에서 기준 셀과 가장 가까운 벽 셀. 벽이 하나도 없으면 null. */
+function nearestWallCellInGrid(grid: TileGrid, from: Cell): Cell | null {
+  let closest: Cell | null = null;
+  let closestDistSq = Infinity;
+
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      if (grid.cells[row * grid.cols + col] !== 1) continue;
+      const dc = col - from.col;
+      const dr = row - from.row;
+      const distSq = dc * dc + dr * dr;
+      if (distSq < closestDistSq) {
+        closestDistSq = distSq;
+        closest = { col, row };
+      }
+    }
+  }
+
+  return closest;
 }
 
 /**
