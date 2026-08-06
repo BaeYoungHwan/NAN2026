@@ -60,3 +60,6 @@ docs/ai-readiness-score.json
 # 크롭 스크립트 미리보기 산출물 (crop-regions.mjs/crop-reaper.mjs preview 모드,
 # 로컬 좌표 확인용 — 실수로 커밋되지 않도록. PR #23 리뷰)
 scripts/preview*.png
+
+# PDF 변환 중간 산출물 (build-submission-pdf.mjs의 KEEP_HTML=1 디버그 모드)
+docs/submission/.*.print.html
