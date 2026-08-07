@@ -93,10 +93,10 @@
 - [x] **PDF 변환 파이프라인 구축 (2026-08-06)** — `scripts/build-submission-pdf.mjs`. pandoc·wkhtmltopdf·puppeteer가 모두 없는 환경이라, 마크다운 → HTML(인쇄용 CSS) → Chrome `--headless --print-to-pdf`로 처리한다. 외부 의존성 0(`generate-audio.mjs`와 같은 기조). 마크다운 파서는 범용이 아니라 제출물 3종이 쓰는 문법만 다룬다 — 헤딩·인용·표·목록(체크박스)·코드블록·이미지·수평선. `KEEP_HTML=1`로 중간 HTML을 남겨 레이아웃을 브라우저로 확인할 수 있다. 출력은 `docs/submission/pdf/`
 - [x] **스크린샷 5컷 촬영 (2026-08-06)** — 타이틀 / 튜토리얼 대사 / 1R(가이드 있음) / 2R(가이드 없음) / 3R(디메리트 HUD). 2R·3R은 `?round=` 디버그 진입으로 찍었는데 이 파라미터는 프로덕션 빌드에서 무시되므로(PR #17 리뷰) dev 서버로 촬영했다 — 렌더 경로는 동일하다. 원본 4.43MB를 `scripts/optimize-screenshots.mjs`(폭 1100px·팔레트 PNG)로 1.01MB까지 줄였다. **허용 각도가 확정되면 1R 부채꼴 크기가 달라지므로 재촬영 필요**
 - [x] **플레이 영상 콘티·촬영 체크리스트 (2026-08-06)** — [`docs/ref/play-video-plan.md`](../../ref/play-video-plan.md). 55초 기준 7컷(타이틀 → 오프닝 2장 → 1R → **의도적 사망** → 2R → 3R 디메리트 → 결과 요약)과 촬영 전/중/업로드 체크리스트. 60초를 넘기면 1R·2R에서 줄이고 사망·디메리트 컷은 유지한다
-- [ ] 플레이 영상 (유튜브 공개 업로드 + 링크만 제출 — [[project-submission-video-hosting]])
-- [ ] 게임소개 PDF — 스크린샷 5컷 삽입·PDF 변환 완료. 남은 작업: 플레이 영상 링크 삽입 후 재변환
-- [ ] AI활용기술문서 PDF — 양쪽 파트 작성 완료(PR #22), PDF 변환 완료. 남은 작업: 라이선스 확인(PR #27의 OpenGameArt BGM 5곡 포함)
-- [ ] 팀원 롤 기술서 PDF — 양쪽 파트 작성 완료, PDF 변환 완료. 남은 작업: 팀 검토 (`docs/product-specs/team-roles.md`는 원호 파트 미작성 상태였던 중복 초안이라 삭제함)
+- [x] 플레이 영상 (2026-08-07 유튜브 업로드 — <https://www.youtube.com/watch?v=zsrd9mrBQdI>. 링크만 제출, 원본 파일은 저장소에 넣지 않음 — [[project-submission-video-hosting]]). 남은 확인: 시크릿 창 재생 확인(§G)
+- [x] 게임소개 PDF — 스크린샷 5컷 삽입·플레이 영상 링크 삽입 완료, 2026-08-07 재변환(1171 KB)
+- [ ] AI활용기술문서 PDF — 양쪽 파트 작성 완료(PR #22), PDF 변환 완료. BGM 5곡 라이선스는 곡별로 검증해 `public/assets/ASSET_SOURCES.md`·`src/content/credits.ts`에 기록·이행 완료(CC0 3곡, CC-BY 2곡). **남은 것은 하나 — DALL·E 생성 이미지의 상업적 이용 약관 최신본 재확인**(`ASSET_SOURCES.md`에 "제출 전 재확인 권장"으로 표기된 항목)
+- [x] 팀원 롤 기술서 PDF — 양쪽 파트 작성 완료, PDF 변환 완료. **팀 검토 완료 (2026-08-07)** — 재작성(`68ba3a0`) → 원본 대조 검증·정정(`d2f4e6e`) → 팀 확인으로 상호 리뷰 체계 반영(`b7602a5`) 순으로 진행했고, 마지막 단계가 당사자 확인을 거친 내용이다. (`docs/product-specs/team-roles.md`는 원호 파트 미작성 상태였던 중복 초안이라 삭제함)
 - [x] 제출물 문서 3종을 `docs/product-specs/`에서 `docs/submission/`으로 통합 이동 (PR #23 리뷰 반영, 2026-08-05) — 기획/작업용 문서(PRD 등)와 제출용 최종본을 디렉터리로 분리. `CLAUDE.md` 프로젝트 구조 트리에도 반영
 
 ### G. 이어서 할 일 (2026-08-07 저녁 기준)
@@ -111,14 +111,20 @@
    - `07b69a0` `CAUTION_MARGIN`/`DANGER_MARGIN`(PR #26에서 도입)을 재사용하도록 정리
    - `GameCanvas.tsx` +62줄, 테스트 37줄. `develop`을 이미 머지해 둬(`f6c61f3`) 충돌 없이 들어올 수 있다
 
-**순서 (배포를 1회로 줄이기 위해 이 순서를 지킨다)**
+**결정 (2026-08-07) — 영상 확정 우선, `wonho` 보류**
 
-- [ ] `wonho` 브랜치 코드 리뷰 → PR 생성 → `develop` 머지
-- [ ] **1R 스크린샷 재촬영** — 부채꼴 색이 위험도에 따라 변하므로 `screenshots/03-round1-guide.png`가 실제 게임과 달라진다. 이 이미지는 README 히어로·라운드 표·게임소개 PDF 세 곳에 쓰인다
-- [ ] `node scripts/optimize-screenshots.mjs` → `node scripts/build-submission-pdf.mjs`
-- [ ] PR #28에 얹어 **한 번에** `main` 배포 (어제 배포가 큐 타임아웃으로 2회 실패했으므로 횟수를 줄인다)
+플레이 영상을 **라이브 빌드(`https://baeyounghwan.github.io/NAN2026/`)로 촬영 완료**했다(`시연영상.mp4`, 8.3MB. 레포에는 넣지 않으므로 `.gitignore`에 `*.mp4` 추가). 이 시점의 라이브에는 `wonho`의 1R 부채꼴 위험도 색이 반영돼 있지 않다.
 
-밸런스 확정(§A)까지 끝나면 스크린샷을 또 찍어야 하므로, 가능하면 플레이테스트를 먼저 하고 재촬영을 한 번으로 합치는 편이 낫다.
+`wonho` 브랜치(`90647bf`, `07b69a0`)를 지금 머지하면 영상 러닝타임의 약 40%(1R 플레이 + 사망 컷, 콘티 0:11~0:32)가 실제 게임과 달라지고, `screenshots/03-round1-guide.png`도 재촬영 대상이 된다. **마감(2026-08-10)까지 3일이므로 영상을 재촬영하지 않는 쪽을 택한다 — `wonho`는 본선/이후 개발로 이월.** 같은 이유로 §A 밸런스 확정도 영상 이후 반영하면 영상과 어긋나므로, 허용 각도를 바꾸는 변경은 제출 후로 미룬다.
+
+**남은 순서**
+
+- [x] 유튜브 업로드 (2026-08-07) — <https://www.youtube.com/watch?v=zsrd9mrBQdI>
+- [x] `docs/submission/game-intro.md` §플레이 영상 링크에 URL 삽입 + 같은 파일 TODO 체크
+- [x] `node scripts/build-submission-pdf.mjs game-intro` → PDF 재생성 (1171 KB)
+- [x] `README.md` 제출물 표 2·3번 행 ✅ 갱신
+- [ ] **시크릿 창(로그아웃 상태)에서 재생 확인** — 자동 조회로는 검증되지 않았다. `WebFetch`로는 페이지 제목("돌려돌려 그림자")만 확인됐고 공개 범위·재생 가능 여부는 YouTube가 JS로 렌더해 확인할 수 없다. 사람이 직접 확인해야 한다
+- [ ] PR #28에 얹어 **한 번에** `main` 배포 (배포 실패가 재발 패턴이므로 횟수를 줄인다. 실패 시 즉시 `gh workflow run deploy-pages.yml --ref main`)
 
 ---
 

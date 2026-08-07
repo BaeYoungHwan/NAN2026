@@ -63,3 +63,6 @@ scripts/preview*.png
 
 # PDF 변환 중간 산출물 (build-submission-pdf.mjs의 KEEP_HTML=1 디버그 모드)
 docs/submission/.*.print.html
+
+# 플레이 영상 원본 (유튜브 업로드 후 링크만 제출 — 레포에는 넣지 않는다)
+*.mp4

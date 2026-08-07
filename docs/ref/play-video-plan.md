@@ -49,6 +49,15 @@
 
 **촬영 후**
 
-- [ ] `docs/submission/game-intro.md`의 "플레이 영상 링크" 절에 URL 삽입
-- [ ] `node scripts/build-submission-pdf.mjs game-intro`로 PDF 재생성
-- [ ] `README.md` 제출물 표 2번 행을 ✅로 갱신
+- [x] `docs/submission/game-intro.md`의 "플레이 영상 링크" 절에 URL 삽입 (2026-08-07)
+- [x] `node scripts/build-submission-pdf.mjs game-intro`로 PDF 재생성 (2026-08-07)
+- [x] `README.md` 제출물 표 2번 행을 ✅로 갱신 (2026-08-07)
+
+---
+
+## 촬영 결과 (2026-08-07)
+
+- 업로드: <https://www.youtube.com/watch?v=zsrd9mrBQdI>
+- 라이브 빌드(`https://baeyounghwan.github.io/NAN2026/`)로 촬영. 원본 `시연영상.mp4`는 저장소에 넣지 않는다(`.gitignore`의 `*.mp4`)
+- 이 영상은 `origin/wonho`(1R 부채꼴 위험도 색) **머지 이전** 화면이다. 해당 브랜치를 머지하면 영상 1R 구간이 실제 게임과 달라지므로 제출 후로 이월했다 — `docs/exec-plans/active/phase-2-core-gameplay.md` §G 참고
+- 설명란 원문은 유튜브에 게시된 것이 정본이다. CC BY 2곡(Mystical Theme / Alexandr Zhelanov, Epilogue / tcarisland)의 저작자·라이선스·변경 사실·라이선스 URI 표기 의무가 **영상 설명란에도 적용**되므로, 재업로드하거나 설명을 고칠 때 이 네 가지가 빠지지 않게 한다(`src/content/credits.ts`가 단일 출처)

@@ -146,10 +146,10 @@ src/
 | # | 제출물 | 형태 | 상태 | 위치/링크 |
 |---|--------|------|------|-----------|
 | 1 | 플레이 가능한 빌드 및 소스 코드 | 웹(GitHub Pages) + 소스 | ✅ 완료 | https://baeyounghwan.github.io/NAN2026/ |
-| 2 | 플레이 동영상 (30~60초) | YouTube | ⏳ 미착수 | - |
-| 3 | 게임 소개 및 설명 문서 | PDF | 🟡 스크린샷·PDF 완료 (영상 링크 대기) | [`game-intro.md`](docs/submission/game-intro.md) · [PDF](docs/submission/pdf/game-intro.pdf) |
+| 2 | 플레이 동영상 (30~60초) | YouTube | ✅ 완료 | https://www.youtube.com/watch?v=zsrd9mrBQdI |
+| 3 | 게임 소개 및 설명 문서 | PDF | ✅ 완료 | [`game-intro.md`](docs/submission/game-intro.md) · [PDF](docs/submission/pdf/game-intro.pdf) |
 | 4 | AI 활용 기술 문서 | PDF | 🟡 PDF 완료 (라이선스 최종 확인 대기) | [`ai-usage-report.md`](docs/submission/ai-usage-report.md) · [PDF](docs/submission/pdf/ai-usage-report.pdf) |
-| 5 | 팀원 롤 기술서 | PDF | 🟡 PDF 완료 (팀 검토 대기) | [`team-roles.md`](docs/submission/team-roles.md) · [PDF](docs/submission/pdf/team-roles.pdf) |
+| 5 | 팀원 롤 기술서 | PDF | ✅ 완료 | [`team-roles.md`](docs/submission/team-roles.md) · [PDF](docs/submission/pdf/team-roles.pdf) |
 
 PDF는 `node scripts/build-submission-pdf.mjs`로 생성합니다 — 마크다운을 고치면 다시 돌리면 됩니다(외부 의존성 없이 Chrome의 인쇄 기능을 씁니다). 스크린샷을 다시 찍은 뒤에는 `node scripts/optimize-screenshots.mjs`로 용량을 정리합니다.
 
