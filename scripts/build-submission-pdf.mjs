@@ -136,11 +136,20 @@ function markdownToHtml(markdown) {
       continue;
     }
 
-    // 인용 — 연속된 `>` 줄을 한 블록으로 묶는다.
+    // 인용 — 연속된 `>` 줄을 한 블록으로 묶되, 줄바꿈은 살린다.
+    //
+    // 마크다운 표준대로 공백으로 이으면 문서 머리말이 "제출 마감 2026-08-10 작성:
+    // 배영환·송원호 ... 최종 갱신: 2026-08-07 대상 게임: ..."처럼 한 줄로 뭉쳐 어디서
+    // 끊어 읽어야 할지 알 수 없게 된다. 제출물 3종의 인용 블록은 전부 한 줄에 하나씩
+    // 독립된 정보(마감일·작성자·대상)를 싣는 용도라 원문의 줄 구분이 곧 의미다.
     if (/^>\s?/.test(line)) {
       const body = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) body.push(lines[i++].replace(/^>\s?/, ""));
-      out.push(`<blockquote>${renderInline(body.join(" "))}</blockquote>`);
+      const rendered = body
+        .map((l) => renderInline(l))
+        .filter((l) => l.trim() !== "")
+        .join("<br>");
+      out.push(`<blockquote>${rendered}</blockquote>`);
       continue;
     }
 
@@ -211,60 +220,132 @@ function markdownToHtml(markdown) {
  * 표·이미지·코드블록이 페이지 경계에서 잘리지 않도록 `break-inside: avoid`를 건다.
  */
 const PRINT_CSS = `
-  @page { size: A4; margin: 18mm 16mm; }
+  /* 여백은 넉넉하게 — 심사자가 한 번에 여러 문서를 읽으므로 빽빽한 지면이 가장 빨리
+     피로해진다. A4에서 좌우 20mm면 한 줄이 대략 40~45자로 떨어져 눈이 편하다. */
+  @page { size: A4; margin: 20mm 20mm 18mm; }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: "Malgun Gothic", "맑은 고딕", "Noto Sans KR", sans-serif;
     font-size: 10.5pt;
-    line-height: 1.65;
-    color: #1a1a1a;
+    line-height: 1.75;
+    color: #22212a;
+    word-break: keep-all;
+    overflow-wrap: break-word;
   }
-  h1 { font-size: 20pt; margin: 0 0 4mm; padding-bottom: 3mm; border-bottom: 2px solid #2b2b2b; }
-  h2 { font-size: 14pt; margin: 8mm 0 3mm; padding-left: 2.5mm; border-left: 4px solid #6b5b7b; break-after: avoid; }
-  h3 { font-size: 11.5pt; margin: 5mm 0 2mm; color: #3a3a3a; break-after: avoid; }
-  p { margin: 0 0 3mm; }
-  ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
-  li { margin-bottom: 1mm; }
-  li > ul { margin-top: 1mm; }
+
+  /* 제목 계층 — 색·크기·여백을 함께 움직여 h1 > h2 > h3가 한눈에 갈리게 한다.
+     색은 게임 세계관(그림자·저승)에 맞춘 보라 계열로 통일. */
+  h1 {
+    font-size: 21pt;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #2d2438;
+    margin: 0 0 6mm;
+    padding-bottom: 4mm;
+    border-bottom: 1px solid #cfc6da;
+  }
+  h2 {
+    font-size: 14pt;
+    font-weight: 700;
+    color: #4c3d63;
+    margin: 10mm 0 4mm;
+    padding-bottom: 1.5mm;
+    border-bottom: 1px solid #e2dceb;
+    break-after: avoid;
+  }
+  h3 {
+    font-size: 11.5pt;
+    font-weight: 600;
+    color: #5f5175;
+    margin: 6mm 0 2.5mm;
+    break-after: avoid;
+  }
+  h2 + h3 { margin-top: 3mm; }
+
+  p { margin: 0 0 3.5mm; }
+  strong { font-weight: 700; color: #191824; }
+
+  ul, ol { margin: 0 0 3.5mm; padding-left: 6.5mm; }
+  li { margin-bottom: 1.5mm; padding-left: 0.5mm; }
+  li::marker { color: #8878a0; }
+  li > ul, li > ol { margin-top: 1.5mm; margin-bottom: 0; }
+
+  /* 문서 머리말(제목 바로 밑 인용구)은 본문 인용과 역할이 달라 따로 잡는다 —
+     제출 마감·작성자·대상 게임을 싣는 자리라 눈에 먼저 들어와야 한다. */
   blockquote {
-    margin: 0 0 4mm;
-    padding: 2.5mm 4mm;
-    background: #f4f2f6;
+    margin: 0 0 5mm;
+    padding: 3mm 4.5mm;
+    background: #f6f4f9;
     border-left: 3px solid #9a8aa8;
-    color: #444;
+    border-radius: 0 2px 2px 0;
+    color: #4a4658;
     font-size: 9.5pt;
+    line-height: 1.7;
   }
+  h1 + blockquote {
+    background: #f3f0f8;
+    border-left-width: 4px;
+    color: #3d3850;
+  }
+
   code {
     font-family: Consolas, "D2Coding", monospace;
-    font-size: 9pt;
-    background: #f0f0f2;
-    padding: 0.3mm 1mm;
+    font-size: 8.8pt;
+    background: #f1eff5;
+    color: #4a3f5c;
+    padding: 0.4mm 1.2mm;
     border-radius: 2px;
+    word-break: break-all;
   }
   pre {
-    background: #f7f7f9;
-    border: 1px solid #e0e0e4;
+    background: #f8f7fa;
+    border: 1px solid #e4e0ea;
     border-radius: 3px;
-    padding: 3mm;
+    padding: 3.5mm 4mm;
+    margin: 0 0 4mm;
     overflow: hidden;
     break-inside: avoid;
   }
-  pre code { background: none; padding: 0; font-size: 8.5pt; line-height: 1.5; }
+  pre code { background: none; color: #2f2a3a; padding: 0; font-size: 8.5pt; line-height: 1.6; }
+
+  /* 표 — 세로 괘선을 지우고 가로선만 남긴다. 칸을 격자로 가두는 것보다 행이 따라
+     읽히고, 열 경계는 패딩만으로 충분히 구분된다. */
   table {
     width: 100%;
     border-collapse: collapse;
-    margin: 0 0 4mm;
+    margin: 0 0 5mm;
     font-size: 9.5pt;
+    line-height: 1.6;
     break-inside: avoid;
   }
-  th, td { border: 1px solid #d5d5da; padding: 1.8mm 2.5mm; text-align: left; vertical-align: top; }
-  th { background: #efedf2; font-weight: 600; }
-  hr { border: none; border-top: 1px solid #ddd; margin: 6mm 0; }
-  a { color: #3a4a8a; text-decoration: none; word-break: break-all; }
-  figure { margin: 0 0 4mm; text-align: center; break-inside: avoid; }
-  img { max-width: 100%; border: 1px solid #ddd; border-radius: 3px; }
-  figcaption { margin-top: 1.5mm; font-size: 9pt; color: #666; }
+  thead th {
+    background: #efebf5;
+    color: #3b3149;
+    font-weight: 700;
+    border-bottom: 1.5px solid #b9aecb;
+  }
+  /* word-break: keep-all(body 상속) — 한국어 기본 줄바꿈은 글자 단위라 좁은 열에서
+     "그림자 경/계 판정 방/식"처럼 어절 한가운데가 잘린다. 어절 단위로만 끊는다. */
+  th, td {
+    padding: 2.2mm 3mm;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid #e6e2ec;
+  }
+  tbody tr:nth-child(even) { background: #faf9fc; }
+  tbody tr:last-child td { border-bottom: 1px solid #cfc6da; }
+
+  hr { border: none; border-top: 1px solid #e2dceb; margin: 8mm 0; }
+  /* break-all은 본문에 그대로 노출되는 긴 URL을 위한 것이다. 표 첫 열의 링크는
+     대개 "ADR-001" 같은 짧은 식별자라, 같은 규칙을 두면 하이픈에서 "ADR-/001"로
+     쪼개진다 — 열 폭을 넓히는 것보다 그 열만 끊지 않게 막는 편이 확실하다. */
+  a { color: #4a3f8a; text-decoration: none; word-break: break-all; }
+  td:first-child a { white-space: nowrap; }
+
+  figure { margin: 0 0 5mm; text-align: center; break-inside: avoid; }
+  img { max-width: 100%; border: 1px solid #ddd8e4; border-radius: 3px; }
+  figcaption { margin-top: 2mm; font-size: 9pt; color: #6b6578; line-height: 1.6; }
 `;
 
 function buildHtml(title, bodyHtml) {
