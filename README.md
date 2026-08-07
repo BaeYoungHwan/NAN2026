@@ -153,7 +153,9 @@ src/
 
 PDF는 `node scripts/build-submission-pdf.mjs`로 생성합니다 — 마크다운을 고치면 다시 돌리면 됩니다(외부 의존성 없이 Chrome의 인쇄 기능을 씁니다). 스크린샷을 다시 찍은 뒤에는 `node scripts/optimize-screenshots.mjs`로 용량을 정리합니다.
 
-배포본은 2026-08-06에 갱신했습니다 — 타이틀 화면·HUD 정리·favicon·DPR 대응과 BGM 외부 음원 교체가 모두 반영돼 있습니다(라이브 실측: 리소스 37건 전부 200, 콘솔 에러 0건). PRD 미결 사항(그림자 길이·허용 각도·회전 속도·가로등 간격·3R 배율)을 플레이테스트로 확정하면 최종 밸런스로 한 번 더 갱신할 예정입니다 — 절차는 [`docs/ref/playtest-protocol.md`](docs/ref/playtest-protocol.md)에 정리해 뒀습니다.
+라이브 빌드는 타이틀 화면·HUD·favicon·DPR 대응과 BGM 외부 음원이 모두 반영된 상태이며, 리소스 37건 전부 200·콘솔 에러 0건을 실측으로 확인했습니다. 테스트 222개 통과, `tsc -b`/`build` 클린입니다.
+
+밸런스 파라미터 13개(그림자 길이·허용 각도·회전 속도·가로등 간격·3R 배율 등)는 [`src/core/tuning.ts`](src/core/tuning.ts) 한 곳에 모아 두고, `?tune=1` 튜닝 패널로 실시간 조정하며 값을 좁혀 왔습니다. 최종 수치는 본선을 앞두고 다인 플레이테스트로 확정합니다 — 진행 절차와 판정 기준은 [`docs/ref/playtest-protocol.md`](docs/ref/playtest-protocol.md)에 미리 정해 뒀습니다.
 
 ## 일정
 
